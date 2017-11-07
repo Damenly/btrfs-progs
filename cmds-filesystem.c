@@ -27,6 +27,7 @@
 #include <mntent.h>
 #include <linux/limits.h>
 #include <getopt.h>
+#include <linux/fs.h>
 
 #include "kerncompat.h"
 #include "ctree.h"
@@ -867,6 +868,8 @@ static const char * const cmd_filesystem_defrag_usage[] = {
 	"-l len              defragment only up to len bytes",
 	"-t size             target extent size hint (default: 32M)",
 	"",
+	"--compress-force    clear nocompress flag on files after defragment, only work with option -c",
+	"",
 	"Warning: most Linux kernels will break up the ref-links of COW data",
 	"(e.g., files copied with 'cp --reflink', snapshots) which may cause",
 	"considerable increase of space usage. See btrfs-filesystem(8) for",
@@ -874,11 +877,41 @@ static const char * const cmd_filesystem_defrag_usage[] = {
 	NULL
 };
 
+static int clear_nocompress_flag(int fd)
+{
+	unsigned int flags;
+	int ret = 0;
+
+	ret = ioctl(fd, FS_IOC_GETFLAGS, &flags);
+	if (ret < 0) {
+		ret = -errno;
+		error("failed to get flags: %s", strerror(-ret));
+		goto out;
+	}
+
+	if (!(flags & FS_NOCOMP_FL)) {
+		ret = 0;
+		goto out;
+	}
+	flags &= ~FS_NOCOMP_FL;
+	ret = ioctl(fd, FS_IOC_SETFLAGS, &flags);
+	if (ret < 0) {
+		ret = -errno;
+		error("failed to set flags: %s", strerror(-ret));
+		goto out;
+	}
+
+	ret = 0;
+out:
+	return ret;
+}
+
 static struct btrfs_ioctl_defrag_range_args defrag_global_range;
 static int defrag_global_verbose;
 static int defrag_global_errors;
+static int defrag_global_clear_nocompress;
 static int defrag_callback(const char *fpath, const struct stat *sb,
-		int typeflag, struct FTW *ftwbuf)
+			   int typeflag, struct FTW *ftwbuf)
 {
 	int ret = 0;
 	int err = 0;
@@ -904,6 +937,14 @@ static int defrag_callback(const char *fpath, const struct stat *sb,
 			err = errno;
 			goto error;
 		}
+
+		if (defrag_global_clear_nocompress) {
+			ret = clear_nocompress_flag(fd);
+			if (ret) {
+				err = -ret;
+				goto error;
+			}
+		}
 	}
 	return 0;
 
@@ -926,6 +967,12 @@ static int cmd_filesystem_defrag(int argc, char **argv)
 	int compress_type = BTRFS_COMPRESS_NONE;
 	DIR *dirstream;
 
+	enum { GETOPT_VAL_CLEAR_NOCOMPRESS = 257};
+	static const struct option long_options[] = {
+		{ "clear-nocompress", no_argument, NULL,
+		  GETOPT_VAL_CLEAR_NOCOMPRESS},
+		{ NULL, 0, NULL, 0}
+	};
 	/*
 	 * Kernel has a different default (256K) that is supposed to be safe,
 	 * but it does not defragment very well. The 32M will likely lead to
@@ -937,8 +984,10 @@ static int cmd_filesystem_defrag(int argc, char **argv)
 	defrag_global_errors = 0;
 	defrag_global_verbose = 0;
 	defrag_global_errors = 0;
+	defrag_global_clear_nocompress = 0;
 	while(1) {
-		int c = getopt(argc, argv, "vrc::fs:l:t:");
+		int c = getopt_long(argc, argv, "vrc::fs:l:t:", long_options,
+				    NULL);
 		if (c < 0)
 			break;
 
@@ -972,6 +1021,9 @@ static int cmd_filesystem_defrag(int argc, char **argv)
 		case 'r':
 			recursive = 1;
 			break;
+		case GETOPT_VAL_CLEAR_NOCOMPRESS:
+			defrag_global_clear_nocompress = 1;
+			break;
 		default:
 			usage(cmd_filesystem_defrag_usage);
 		}
@@ -987,6 +1039,8 @@ static int cmd_filesystem_defrag(int argc, char **argv)
 	if (compress_type) {
 		defrag_global_range.flags |= BTRFS_DEFRAG_RANGE_COMPRESS;
 		defrag_global_range.compress_type = compress_type;
+	} else if (defrag_global_clear_nocompress) {
+		warning("Option --clear-nocompress only works for -c");
 	}
 	if (flush)
 		defrag_global_range.flags |= BTRFS_DEFRAG_RANGE_START_IO;
@@ -1065,10 +1119,18 @@ static int cmd_filesystem_defrag(int argc, char **argv)
 				close_file_or_dir(fd, dirstream);
 				break;
 			}
-
 			if (ret) {
 				error("defrag failed on %s: %s", argv[i],
 				      strerror(defrag_err));
+				goto next;
+			}
+
+			if (defrag_global_clear_nocompress)
+				ret = clear_nocompress_flag(fd);
+			if (ret) {
+				error(
+				"failed to drop nocompress flag on %s: %s",
+				argv[i], strerror(-ret));
 				goto next;
 			}
 		}
