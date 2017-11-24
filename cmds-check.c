@@ -134,6 +134,7 @@ struct data_backref {
 #define DIR_INDEX_MISMATCH      (1<<19) /* INODE_INDEX found but not match */
 #define DIR_COUNT_AGAIN         (1<<20) /* DIR isize should be recalculated */
 #define BG_ACCOUNTING_ERROR     (1<<21) /* Block group accounting error */
+#define FATAL_ERROR             (1<<22) /* fatal bit for errno */
 
 static inline struct data_backref* to_data_backref(struct extent_backref *back)
 {
@@ -6550,7 +6551,7 @@ static struct data_backref *find_data_backref(struct extent_record *rec,
  *                otherwise means check fs tree(s) items relationship and
  *		  @root MUST be a fs tree root.
  * Returns 0      represents OK.
- * Returns not 0  represents error.
+ * Returns > 0    represents error bits.
  */
 static int check_btrfs_root(struct btrfs_trans_handle *trans,
 			    struct btrfs_root *root, unsigned int ext_ref,
@@ -6601,12 +6602,12 @@ static int check_btrfs_root(struct btrfs_trans_handle *trans,
 	while (1) {
 		ret = walk_down_tree_v2(trans, root, &path, &level, &nrefs,
 					ext_ref, check_all);
-
-		err |= !!ret;
+		if (ret > 0)
+			err |= ret;
 
 		/* if ret is negative, walk shall stop */
 		if (ret < 0) {
-			ret = err;
+			ret = err | FATAL_ERROR;
 			break;
 		}
 
@@ -6632,12 +6633,12 @@ static int pin_metadata_blocks(struct btrfs_fs_info *fs_info);
  * @ext_ref:	the EXTENDED_IREF feature
  *
  * Return 0 if no error found.
- * Return <0 for error.
+ * Return not 0 for error.
  */
 static int check_fs_root_v2(struct btrfs_root *root, unsigned int ext_ref)
 {
 	reset_cached_block_groups(root->fs_info);
-	return check_btrfs_root(NULL, root, ext_ref, 0);
+	return !!check_btrfs_root(NULL, root, ext_ref, 0);
 }
 
 /*
