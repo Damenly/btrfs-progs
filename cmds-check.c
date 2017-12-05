@@ -2699,8 +2699,7 @@ static int check_leaf_items(struct btrfs_root *root, struct btrfs_path *path,
  * Returns <0  Fatal error, must exit the whole check
  * Returns 0   No errors found
  */
-static int walk_down_tree_v2(struct btrfs_trans_handle *trans,
-			     struct btrfs_root *root, struct btrfs_path *path,
+static int walk_down_tree_v2(struct btrfs_root *root, struct btrfs_path *path,
 			     int *level, struct node_refs *nrefs, int ext_ref,
 			     int check_all)
 
@@ -6573,8 +6572,7 @@ static struct data_backref *find_data_backref(struct extent_record *rec,
  * Returns 0      represents OK.
  * Returns > 0    represents error bits.
  */
-static int check_btrfs_root(struct btrfs_trans_handle *trans,
-			    struct btrfs_root *root, unsigned int ext_ref,
+static int check_btrfs_root(struct btrfs_root *root, unsigned int ext_ref,
 			    int check_all)
 
 {
@@ -6620,8 +6618,8 @@ static int check_btrfs_root(struct btrfs_trans_handle *trans,
 	}
 
 	while (1) {
-		ret = walk_down_tree_v2(trans, root, &path, &level, &nrefs,
-					ext_ref, check_all);
+		ret = walk_down_tree_v2(root, &path, &level, &nrefs, ext_ref,
+					check_all);
 		if (ret > 0)
 			err |= ret;
 
@@ -6658,7 +6656,7 @@ static int pin_metadata_blocks(struct btrfs_fs_info *fs_info);
 static int check_fs_root_v2(struct btrfs_root *root, unsigned int ext_ref)
 {
 	reset_cached_block_groups(root->fs_info);
-	return !!check_btrfs_root(NULL, root, ext_ref, 0);
+	return !!check_btrfs_root(root, ext_ref, 0);
 }
 
 /*
@@ -13590,11 +13588,11 @@ static int check_chunks_and_extents_v2(struct btrfs_fs_info *fs_info)
 	}
 
 	root1 = root->fs_info->chunk_root;
-	ret = check_btrfs_root(trans, root1, 0, 1);
+	ret = check_btrfs_root(root1, 0, 1);
 	err |= ret;
 
 	root1 = root->fs_info->tree_root;
-	ret = check_btrfs_root(trans, root1, 0, 1);
+	ret = check_btrfs_root(root1, 0, 1);
 	err |= ret;
 
 	btrfs_init_path(&path);
@@ -13625,7 +13623,7 @@ static int check_chunks_and_extents_v2(struct btrfs_fs_info *fs_info)
 			goto next;
 		}
 
-		ret = check_btrfs_root(trans, cur_root, 0, 1);
+		ret = check_btrfs_root(cur_root, 0, 1);
 		err |= ret;
 
 		if (key.objectid == BTRFS_TREE_RELOC_OBJECTID)
