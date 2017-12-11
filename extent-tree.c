@@ -1873,7 +1873,7 @@ static void set_avail_alloc_bits(struct btrfs_fs_info *fs_info, u64 flags)
 
 static int do_chunk_alloc(struct btrfs_trans_handle *trans,
 			  struct btrfs_fs_info *fs_info, u64 alloc_bytes,
-			  u64 flags)
+			  u64 flags, int force_chunk)
 {
 	struct btrfs_space_info *space_info;
 	u64 thresh;
@@ -1888,6 +1888,8 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans,
 	}
 	BUG_ON(!space_info);
 
+	if (force_chunk)
+		goto alloc_chunk;
 	if (space_info->full)
 		return 0;
 
@@ -1906,6 +1908,7 @@ static int do_chunk_alloc(struct btrfs_trans_handle *trans,
 	    (flags & BTRFS_BLOCK_GROUP_SYSTEM))
 		return 0;
 
+alloc_chunk:
 	ret = btrfs_alloc_chunk(trans, fs_info, &start, &num_bytes,
 	                        space_info->flags, false);
 	if (ret == -ENOSPC) {
@@ -2649,6 +2652,7 @@ int btrfs_reserve_extent(struct btrfs_trans_handle *trans,
 			 struct btrfs_key *ins, bool is_data)
 {
 	int ret;
+	int force_chunk_alloc = 0;
 	u64 search_start = 0;
 	u64 alloc_profile;
 	u64 profile;
@@ -2667,16 +2671,16 @@ int btrfs_reserve_extent(struct btrfs_trans_handle *trans,
 			        info->metadata_alloc_profile;
 		profile = BTRFS_BLOCK_GROUP_METADATA | alloc_profile;
 	}
-
-	if (root->ref_cows) {
-		if (!(profile & BTRFS_BLOCK_GROUP_METADATA)) {
-			ret = do_chunk_alloc(trans, info,
-					     num_bytes,
-					     BTRFS_BLOCK_GROUP_METADATA);
+chunk_alloc:
+	if (root->ref_cows  || force_chunk_alloc) {
+		if (!(is_data & BTRFS_BLOCK_GROUP_METADATA)) {
+			ret = do_chunk_alloc(trans, info, num_bytes,
+					     BTRFS_BLOCK_GROUP_METADATA,
+					     force_chunk_alloc);
 			BUG_ON(ret);
 		}
-		ret = do_chunk_alloc(trans, info,
-				     num_bytes + SZ_2M, profile);
+		ret = do_chunk_alloc(trans, info, num_bytes + SZ_2M, profile,
+				     force_chunk_alloc);
 		BUG_ON(ret);
 	}
 
@@ -2685,6 +2689,10 @@ int btrfs_reserve_extent(struct btrfs_trans_handle *trans,
 			       search_start, search_end, hint_byte, ins,
 			       trans->alloc_exclude_start,
 			       trans->alloc_exclude_nr, profile);
+	if (ret == -ENOSPC && !force_chunk_alloc) {
+		force_chunk_alloc = 1;
+		goto chunk_alloc;
+	}
 	if (ret < 0)
 		return ret;
 	clear_extent_dirty(&info->free_space_cache,
