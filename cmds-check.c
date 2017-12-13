@@ -84,6 +84,14 @@ enum btrfs_check_mode {
 
 static enum btrfs_check_mode check_mode = CHECK_MODE_DEFAULT;
 
+enum lowmem_extents_operation {
+	EXTENTS_EXCLUDE,
+	EXTENTS_MARK_BG_FULL,
+	EXTENTS_NONE
+};
+
+static enum lowmem_extents_operation extents_operation = EXTENTS_NONE;
+
 struct extent_backref {
 	struct rb_node node;
 	unsigned int is_data:1;
@@ -13401,7 +13409,87 @@ out:
 	return err;
 }
 
+static void cleanup_excluded_extents(struct btrfs_fs_info *fs_info);
+static int end_avoid_extents_overwrite(struct btrfs_fs_info *fs_info)
+{
+	int ret;
+
+	switch (extents_operation) {
+	case EXTENTS_EXCLUDE:
+		cleanup_excluded_extents(fs_info);
+		ret = 0;
+		break;
+	case EXTENTS_MARK_BG_FULL:
+		ret = clear_block_groups_full(fs_info,
+					      BTRFS_BLOCK_GROUP_METADATA);
+		break;
+	case EXTENTS_NONE:
+		ret = 0;
+		break;
+	default:
+		ret = -EINVAL;
+	}
+
+	if (!ret)
+		extents_operation = EXTENTS_NONE;
+	return ret;
+}
+
 static int pin_metadata_blocks(struct btrfs_fs_info *fs_info);
+static int exclude_metadata_blocks(struct btrfs_fs_info *fs_info);
+/*
+ * NOTE: Do not call this function during transaction.
+ */
+static int avoid_extents_overwrite(struct btrfs_fs_info *fs_info,
+				   enum lowmem_extents_operation op)
+{
+	int ret;
+
+	if (op == extents_operation)
+		return 0;
+
+	switch (op) {
+	case EXTENTS_EXCLUDE:
+		ret = exclude_metadata_blocks(fs_info);
+		break;
+	case EXTENTS_MARK_BG_FULL:
+		ret = mark_block_groups_full(fs_info,
+					     BTRFS_BLOCK_GROUP_METADATA);
+		break;
+	case EXTENTS_NONE:
+		ret = end_avoid_extents_overwrite(fs_info);
+		if (ret)
+			goto out;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	/* extents_operation should be assigned anyway for latter clean up. */
+	extents_operation = op;
+
+	if (ret)
+		end_avoid_extents_overwrite(fs_info);
+out:
+	return ret;
+}
+
+static int try_to_exclude_extents(struct btrfs_fs_info *fs_info)
+{
+	int ret;
+	int mixed = btrfs_fs_incompat(fs_info, MIXED_GROUPS);
+
+	if (extents_operation != EXTENTS_NONE)
+		return 0;
+	if (mixed)
+		return -ENOTTY;
+
+	printf("Try to exclude all metadata blcoks, it may be slow\n");
+	ret = avoid_extents_overwrite(fs_info, EXTENTS_EXCLUDE);
+	if (ret)
+		error("failed to exclude extents %s", strerror(-ret));
+	return ret;
+}
 
 /*
  * Low memory usage version check_chunks_and_extents.
@@ -13421,12 +13509,14 @@ static int check_chunks_and_extents_v2(struct btrfs_fs_info *fs_info)
 	root = fs_info->fs_root;
 
 	if (repair) {
-		/* pin every tree block to avoid extent overwrite */
-		ret = pin_metadata_blocks(fs_info);
-		if (ret) {
-			error("failed to pin metadata blocks");
-			return ret;
-		}
+		/*
+		 * It's tolerable for the error, we will try to exclude
+		 * extents in next repair functions.
+		 */
+		ret = avoid_extents_overwrite(fs_info, EXTENTS_MARK_BG_FULL);
+		if (ret)
+			error("failed to force CoW in new chunk %s",
+			      strerror(-ret));
 		trans = btrfs_start_transaction(fs_info->extent_root, 1);
 		if (IS_ERR(trans)) {
 			error("failed to start transaction before check");
