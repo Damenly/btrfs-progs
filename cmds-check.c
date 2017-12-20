@@ -13793,6 +13793,11 @@ out:
 
 	/* if repair, update block accounting */
 	if (repair) {
+		/* Just do clean up, ignore return values here*/
+		end_avoid_extents_overwrite(fs_info);
+		modify_block_groups_cache(fs_info, BTRFS_BLOCK_GROUP_METADATA,
+					  0);
+
 		ret = btrfs_fix_block_accounting(trans, root);
 		if (ret)
 			err |= ret;
@@ -13804,7 +13809,6 @@ out:
 		btrfs_commit_transaction(trans, root->fs_info->extent_root);
 
 	btrfs_release_path(&path);
-
 	return err;
 }
 
@@ -14214,6 +14218,7 @@ static int reinit_extent_tree(struct btrfs_trans_handle *trans,
 {
 	u64 start = 0;
 	int ret;
+	int pin_extents = check_mode == CHECK_MODE_ORIGINAL;
 
 	/*
 	 * The only reason we don't do this is because right now we're just
@@ -14235,10 +14240,21 @@ static int reinit_extent_tree(struct btrfs_trans_handle *trans,
 	 * down the bytes that are in use so we don't overwrite any existing
 	 * metadata.
 	 */
-	ret = pin_metadata_blocks(fs_info);
-	if (ret) {
-		fprintf(stderr, "error pinning down used bytes\n");
-		return ret;
+again:
+	if (pin_extents) {
+		ret = pin_metadata_blocks(fs_info);
+		if (ret) {
+			fprintf(stderr, "error pinning down used bytes\n");
+			return ret;
+		}
+	} else {
+		ret = avoid_extents_overwrite(fs_info, EXTENTS_EXCLUDE);
+		if (ret) {
+			fprintf(stderr, "error excluding used bytes\n");
+			printf("try to pin down used bytes\n");
+			pin_extents = 1;
+			goto again;
+		}
 	}
 
 	/*
