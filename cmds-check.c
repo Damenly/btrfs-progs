@@ -13776,6 +13776,30 @@ static int try_avoid_extents_overwrite(struct btrfs_fs_info *fs_info)
 }
 
 /*
+ * Wrapper function for btrfs_fix_block_accounting().
+ *
+ * Returns 0     on success.
+ * Returns != 0  on error.
+ */
+static int repair_block_accounting(struct btrfs_fs_info *fs_info)
+{
+	struct btrfs_trans_handle *trans = NULL;
+	struct btrfs_root *root = fs_info->extent_root;
+	int ret;
+
+	trans = btrfs_start_transaction(root, 1);
+	if (IS_ERR(trans)) {
+		ret = PTR_ERR(trans);
+		error("fail to start transaction %s", strerror(-ret));
+		return ret;
+	}
+
+	ret = btrfs_fix_block_accounting(trans, root);
+	btrfs_commit_transaction(trans, root);
+	return ret;
+}
+
+/*
  * Low memory usage version check_chunks_and_extents.
  */
 static int check_chunks_and_extents_v2(struct btrfs_fs_info *fs_info)
@@ -13861,7 +13885,7 @@ out:
 		modify_block_groups_cache(fs_info, BTRFS_BLOCK_GROUP_METADATA,
 					  0);
 
-		ret = btrfs_fix_block_accounting(trans, root);
+		ret = repair_block_accounting(fs_info);
 		if (ret)
 			err |= ret;
 		else
