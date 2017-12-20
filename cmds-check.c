@@ -84,6 +84,15 @@ enum btrfs_check_mode {
 
 static enum btrfs_check_mode check_mode = CHECK_MODE_DEFAULT;
 
+enum lowmem_extents_operation {
+	EXTENTS_NONE,
+	EXTENTS_EXCLUDE,
+	EXTENTS_MARK_BG_FULL,
+};
+
+static enum lowmem_extents_operation extents_operation = EXTENTS_NONE;
+static u64 last_allocated_chunk;
+
 struct extent_backref {
 	struct rb_node node;
 	unsigned int is_data:1;
@@ -11074,6 +11083,23 @@ out:
 	return ret;
 }
 
+/*
+ * Returns <0 for error.
+ * Returns 0 for success.
+ */
+static int try_to_force_cow_in_new_chunk(struct btrfs_fs_info *fs_info)
+{
+	int ret;
+
+	if (last_allocated_chunk) {
+		ret = is_chunk_almost_full(fs_info, last_allocated_chunk);
+		if (ret <= 0)
+			return ret;
+	}
+	ret = force_cow_in_new_chunk(fs_info, &last_allocated_chunk);
+	return ret;
+}
+
 static int check_extent_refs(struct btrfs_root *root,
 			     struct cache_tree *extent_cache)
 {
@@ -13598,6 +13624,92 @@ again:
 	goto again;
 out:
 	return err;
+}
+
+static void cleanup_excluded_extents(struct btrfs_fs_info *fs_info);
+static int end_avoid_extents_overwrite(struct btrfs_fs_info *fs_info)
+{
+	int ret;
+
+	switch (extents_operation) {
+	case EXTENTS_EXCLUDE:
+		cleanup_excluded_extents(fs_info);
+		ret = 0;
+		break;
+	case EXTENTS_MARK_BG_FULL:
+		ret = modify_block_groups_cache(fs_info,
+						BTRFS_BLOCK_GROUP_METADATA, 0);
+		break;
+	case EXTENTS_NONE:
+		ret = 0;
+		break;
+	default:
+		ret = -EINVAL;
+	}
+
+	if (!ret)
+		extents_operation = EXTENTS_NONE;
+	return ret;
+}
+
+static int pin_metadata_blocks(struct btrfs_fs_info *fs_info);
+static int exclude_metadata_blocks(struct btrfs_fs_info *fs_info);
+/*
+ * NOTE: Do not call this function during transaction.
+ */
+static int avoid_extents_overwrite(struct btrfs_fs_info *fs_info,
+				   enum lowmem_extents_operation op)
+{
+	int ret;
+
+	if (op == extents_operation && EXTENTS_MARK_BG_FULL != op)
+		return 0;
+
+	switch (op) {
+	case EXTENTS_EXCLUDE:
+		ret = exclude_metadata_blocks(fs_info);
+		break;
+	case EXTENTS_MARK_BG_FULL:
+		ret = try_to_force_cow_in_new_chunk(fs_info);
+		break;
+	case EXTENTS_NONE:
+		ret = end_avoid_extents_overwrite(fs_info);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	/* extents_operation should be assigned anyway for latter clean up. */
+	extents_operation = op;
+
+	if (ret)
+		end_avoid_extents_overwrite(fs_info);
+	return ret;
+}
+
+static int try_avoid_extents_overwrite(struct btrfs_fs_info *fs_info)
+{
+	int ret;
+	int mixed = btrfs_fs_incompat(fs_info, MIXED_GROUPS);
+
+	if (extents_operation != EXTENTS_NONE &&
+	    extents_operation != EXTENTS_MARK_BG_FULL)
+		return 0;
+	ret = avoid_extents_overwrite(fs_info, EXTENTS_MARK_BG_FULL);
+
+	/*
+	 * If there is no space left to allocate, try to exclude all metadata
+	 * blocks. Mix filesystem is unsupported.
+	 */
+	if (ret && ret == -ENOSPC && !mixed) {
+		printf(
+	"Try to exclude all metadata blcoks and extents, it may be slow\n");
+		ret = avoid_extents_overwrite(fs_info, EXTENTS_EXCLUDE);
+	}
+
+	if (ret)
+		error("failed to avoid extents overwrite %s", strerror(-ret));
+	return ret;
 }
 
 /*
