@@ -464,56 +464,56 @@ static int find_free_dev_extent(struct btrfs_device *device, u64 num_bytes,
 	return find_free_dev_extent_start(device, num_bytes, 0, start, NULL);
 }
 
-static int btrfs_alloc_dev_extent(struct btrfs_trans_handle *trans,
-				  struct btrfs_device *device,
-				  u64 chunk_offset, u64 num_bytes, u64 *start,
-				  int convert)
+/*
+ * Insert dev extents according to struct map_lookup.
+ */
+static int btrfs_insert_dev_extents(struct btrfs_trans_handle *trans,
+				    struct btrfs_fs_info *fs_info,
+				    struct map_lookup *map, u64 stripe_size)
 {
 	int ret;
-	struct btrfs_path *path;
-	struct btrfs_root *root = device->dev_root;
+	int i;
+	struct btrfs_path path;
+	struct btrfs_root *root = fs_info->dev_root;
 	struct btrfs_dev_extent *extent;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
 
-	path = btrfs_alloc_path();
-	if (!path)
-		return -ENOMEM;
+	btrfs_init_path(&path);
 
-	/*
-	 * For convert case, just skip search free dev_extent, as caller
-	 * is responsible to make sure it's free.
-	 */
-	if (!convert) {
-		ret = find_free_dev_extent(device, num_bytes, start);
-		if (ret)
-			goto err;
+	for (i = 0; i < map->num_stripes; i++) {
+		struct btrfs_device *device = map->stripes[i].dev;
+
+		key.objectid = device->devid;
+		key.offset = map->stripes[i].physical;
+		key.type = BTRFS_DEV_EXTENT_KEY;
+
+		ret = btrfs_insert_empty_item(trans, root, &path, &key,
+					      sizeof(*extent));
+		if (ret < 0)
+			return ret;
+		leaf = path.nodes[0];
+		extent = btrfs_item_ptr(leaf, path.slots[0],
+					struct btrfs_dev_extent);
+		btrfs_set_dev_extent_chunk_tree(leaf, extent,
+				BTRFS_CHUNK_TREE_OBJECTID);
+		btrfs_set_dev_extent_chunk_objectid(leaf, extent,
+				BTRFS_FIRST_CHUNK_TREE_OBJECTID);
+		btrfs_set_dev_extent_chunk_offset(leaf, extent, map->ce.start);
+		btrfs_set_dev_extent_length(leaf, extent, stripe_size);
+
+		write_extent_buffer(leaf, fs_info->chunk_tree_uuid,
+			(unsigned long)btrfs_dev_extent_chunk_tree_uuid(extent),
+			BTRFS_UUID_SIZE);
+		btrfs_mark_buffer_dirty(leaf);
+		btrfs_release_path(&path);
+
+		device->bytes_used += stripe_size;
+		ret = btrfs_update_device(trans, device);
+		if (ret < 0)
+			return ret;
 	}
-
-	key.objectid = device->devid;
-	key.offset = *start;
-	key.type = BTRFS_DEV_EXTENT_KEY;
-	ret = btrfs_insert_empty_item(trans, root, path, &key,
-				      sizeof(*extent));
-	BUG_ON(ret);
-
-	leaf = path->nodes[0];
-	extent = btrfs_item_ptr(leaf, path->slots[0],
-				struct btrfs_dev_extent);
-	btrfs_set_dev_extent_chunk_tree(leaf, extent, BTRFS_CHUNK_TREE_OBJECTID);
-	btrfs_set_dev_extent_chunk_objectid(leaf, extent,
-					    BTRFS_FIRST_CHUNK_TREE_OBJECTID);
-	btrfs_set_dev_extent_chunk_offset(leaf, extent, chunk_offset);
-
-	write_extent_buffer(leaf, root->fs_info->chunk_tree_uuid,
-		    (unsigned long)btrfs_dev_extent_chunk_tree_uuid(extent),
-		    BTRFS_UUID_SIZE);
-
-	btrfs_set_dev_extent_length(leaf, extent, num_bytes);
-	btrfs_mark_buffer_dirty(leaf);
-err:
-	btrfs_free_path(path);
-	return ret;
+	return 0;
 }
 
 static int find_next_chunk(struct btrfs_fs_info *fs_info, u64 *offset)
@@ -1055,6 +1055,10 @@ again:
 
 	/*
 	 * Fill chunk mapping and chunk stripes
+	 *
+	 * NOTE: Until we updated new block group space info, we shouldn't
+	 * modify any tree, as it's possible that the metadata chunks are
+	 * already full and we can hit ENOSPC CoW tree blocks.
 	 */
 alloc_chunk:
 	if (!convert) {
@@ -1105,16 +1109,11 @@ alloc_chunk:
 			dev_offset = *start;
 		}
 
-		ret = btrfs_alloc_dev_extent(trans, device, key.offset,
-			     calc_size, &dev_offset, convert);
-		if (ret < 0)
-			goto out_chunk_map;
-
-		device->bytes_used += calc_size;
-		ret = btrfs_update_device(trans, device);
-		if (ret < 0)
-			goto out_chunk_map;
-
+		if (!convert) {
+			ret = find_free_dev_extent(device, calc_size, &dev_offset);
+			if (ret)
+				goto out_chunk_map;
+		}
 		map->stripes[index].dev = device;
 		map->stripes[index].physical = dev_offset;
 		stripe = stripes + index;
@@ -1124,6 +1123,29 @@ alloc_chunk:
 		index++;
 	}
 	BUG_ON(!convert && !list_empty(&private_devs));
+
+	map->ce.start = key.offset;
+	map->ce.size = *num_bytes;
+	map->sector_size = info->sectorsize;
+	map->stripe_len = stripe_len;
+	map->io_align = stripe_len;
+	map->io_width = stripe_len;
+	map->type = type;
+	map->num_stripes = num_stripes;
+	map->sub_stripes = sub_stripes;
+
+	ret = insert_cache_extent(&info->mapping_tree.cache_tree, &map->ce);
+	if (ret < 0)
+		goto out_chunk_map;
+
+	/* Insert block group space info and block group item now */
+	ret = btrfs_make_block_group(trans, info, 0, type, map->ce.start,
+				     map->ce.size);
+	if (ret < 0)
+		goto out_chunk;
+
+	/* Insert dev extents */
+	ret = btrfs_insert_dev_extents(trans, info, map, calc_size);
 
 	/* key was set above */
 	btrfs_set_stack_chunk_length(chunk, *num_bytes);
@@ -1135,14 +1157,6 @@ alloc_chunk:
 	btrfs_set_stack_chunk_io_width(chunk, stripe_len);
 	btrfs_set_stack_chunk_sector_size(chunk, info->sectorsize);
 	btrfs_set_stack_chunk_sub_stripes(chunk, sub_stripes);
-	map->sector_size = info->sectorsize;
-	map->stripe_len = stripe_len;
-	map->io_align = stripe_len;
-	map->io_width = stripe_len;
-	map->type = type;
-	map->num_stripes = num_stripes;
-	map->sub_stripes = sub_stripes;
-
 	/*
 	 * Insert chunk item and chunk mapping.
 	 */
@@ -1150,13 +1164,6 @@ alloc_chunk:
 				btrfs_chunk_item_size(num_stripes));
 	BUG_ON(ret);
 	*start = key.offset;;
-
-	map->ce.start = key.offset;
-	map->ce.size = *num_bytes;
-
-	ret = insert_cache_extent(&info->mapping_tree.cache_tree, &map->ce);
-	if (ret < 0)
-		goto out_chunk_map;
 
 	if (type & BTRFS_BLOCK_GROUP_SYSTEM) {
 		ret = btrfs_add_system_chunk(info, &key,
@@ -1167,8 +1174,6 @@ alloc_chunk:
 
 	kfree(chunk);
 
-	ret = btrfs_make_block_group(trans, info, 0, type, map->ce.start,
-				     map->ce.size);
 	return ret;
 
 out_chunk_map:
