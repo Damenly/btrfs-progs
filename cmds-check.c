@@ -3307,6 +3307,187 @@ static int find_file_type(struct inode_record *rec, u8 *type)
 }
 
 /*
+ * Fetch filetype from exited completed dir_item, dir_index and inode_item.
+ * If two of tree items'filetype are same, we think the type is trusted.
+ *
+ * Return 0 if file type is found and BTRFS_FT_* is stored into type.
+ * Return <0 if file type is not found or on error.
+ */
+static int find_file_type_lowmem(struct btrfs_root *root, u64 ino, u8 *type)
+{
+	struct btrfs_key key;
+	struct btrfs_path path;
+	struct btrfs_path path2;
+	struct btrfs_inode_ref *iref;
+	struct btrfs_dir_item *dir_item;
+	struct btrfs_dir_item *dir_index;
+	struct extent_buffer *eb;
+	u64 dir;
+	u64 index;
+	char namebuf[BTRFS_NAME_LEN] = {0};
+	u32 namelen;
+	u8 inode_filetype = BTRFS_FT_UNKNOWN;
+	u8 dir_item_filetype;
+	u8 dir_index_filetype;
+	u8 true_file_type;
+	int slot;
+	int ret;
+
+	key.objectid = ino;
+	key.type = BTRFS_INODE_ITEM_KEY;
+	key.offset = 0;
+
+	btrfs_init_path(&path);
+	ret = btrfs_search_slot(NULL, root, &key, &path, 0, 0);
+	if (ret < 0)
+		goto out;
+	if (!ret) {
+		struct btrfs_inode_item *ii;
+
+		ii = btrfs_item_ptr(path.nodes[0], path.slots[0],
+				    struct btrfs_inode_item);
+		inode_filetype = imode_to_type(btrfs_inode_mode(path.nodes[0],
+								ii));
+	}
+
+	key.objectid = ino;
+	key.type = BTRFS_INODE_REF_KEY;
+	key.offset = (u64)-1;
+
+	btrfs_release_path(&path);
+	ret = btrfs_search_slot(NULL, root, &key, &path, 0, 0);
+	if (ret < 0)
+		goto out;
+	if (!ret) {
+		ret = -EIO;
+		goto out;
+	}
+
+	btrfs_init_path(&path2);
+next:
+	btrfs_release_path(&path2);
+	ret = btrfs_previous_item(root, &path, ino, BTRFS_INODE_REF_KEY);
+	if (ret > 0)
+		ret = -ENOENT;
+	if (ret)
+		goto out;
+
+	eb = path.nodes[0];
+	slot = path.slots[0];
+	btrfs_item_key_to_cpu(eb, &key, slot);
+	dir = key.offset;
+	iref = btrfs_item_ptr(eb, slot, struct btrfs_inode_ref);
+	index = btrfs_inode_ref_index(eb, iref);
+	namelen = btrfs_inode_ref_name_len(eb, iref);
+	read_extent_buffer(eb, namebuf, (unsigned long)(iref + 1), namelen);
+
+	dir_index = btrfs_lookup_dir_index(NULL, root, &path2, dir, namebuf,
+					   namelen, index, 0);
+	if (!dir_index)
+		goto next;
+	dir_index_filetype = btrfs_dir_type(path2.nodes[0], dir_index);
+	btrfs_release_path(&path2);
+	if (dir_index_filetype == inode_filetype) {
+		true_file_type = inode_filetype;
+		goto found;
+	}
+
+	dir_item = btrfs_lookup_dir_item(NULL, root, &path2, dir, namebuf,
+					 namelen, 0);
+	if (!dir_item)
+		goto next;
+	dir_item_filetype = btrfs_dir_type(path2.nodes[0], dir_item);
+	btrfs_release_path(&path2);
+	if (dir_item_filetype == inode_filetype) {
+		true_file_type = inode_filetype;
+		goto found;
+	}
+
+	if (dir_index_filetype == dir_item_filetype) {
+		true_file_type = dir_index_filetype;
+		goto found;
+	}
+	goto next;
+found:
+	/* rare case, two of three items are both corrupted */
+	if (true_file_type == BTRFS_FT_UNKNOWN ||
+	    true_file_type >= BTRFS_FT_MAX)
+		goto next;
+	*type = true_file_type;
+	ret = 0;
+out:
+	btrfs_release_path(&path);
+	return ret;
+}
+
+static int find_normal_file_extent(struct btrfs_root *root, u64 ino);
+/*
+ * Try to determine inode type if type not found.
+ *
+ * For found regular file extent, it must be FILE.
+ * For found dir_item/index, it must be DIR.
+ *
+ * Return 0 if file type is confirmed and BTRFS_FT_* is stored into type.
+ * Return <0 if file type is unknown.
+ */
+static int guess_file_type_lowmem(struct btrfs_root *root, u64 ino, u8 *type)
+{
+	struct btrfs_key key;
+	struct btrfs_path *path = NULL;
+	bool is_dir = false;
+	bool is_file = false;
+	int ret;
+
+	if (find_normal_file_extent(root, ino)) {
+		is_file = true;
+		goto out;
+	}
+
+	key.objectid = ino;
+	key.type = BTRFS_DIR_INDEX_KEY;
+	key.offset = (u64)-1;
+
+	path = btrfs_alloc_path();
+	if (!path)
+		goto out;
+	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+	if (ret < 0)
+		goto out;
+	if (!ret) {
+		is_dir = true;
+		goto out;
+	}
+
+	ret = btrfs_previous_item(root, path, ino, BTRFS_DIR_ITEM_KEY);
+	if (!ret) {
+		is_dir = true;
+		goto out;
+	}
+	if (ret < 0)
+		goto out;
+
+	ret = btrfs_previous_item(root, path, ino, BTRFS_DIR_ITEM_KEY);
+	if (!ret) {
+		is_dir = true;
+		goto out;
+	}
+out:
+	if (path)
+		btrfs_release_path(path);
+
+	if (is_dir) {
+		*type = BTRFS_FT_DIR;
+		ret = 0;
+	} else if (is_file) {
+		*type = BTRFS_FT_REG_FILE;
+		ret = 0;
+	} else {
+		ret = -ENOENT;
+	}
+	return ret;
+}
+
+/*
  * To determine the file name for nlink repair
  *
  * Return 0 if file name is found, set name and namelen.
