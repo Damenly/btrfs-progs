@@ -5149,6 +5149,9 @@ out:
 /*
  * Insert the missing inode item.
  *
+ * @filetype: if 0, find file type automatically.
+ *                  if find nothing, set inode as regular file.
+ *
  * Returns 0 means success.
  * Returns <0 means error.
  */
@@ -5164,6 +5167,19 @@ static int repair_inode_item_missing(struct btrfs_root *root, u64 ino,
 	key.type = BTRFS_INODE_ITEM_KEY;
 	key.offset = 0;
 
+	if (!filetype) {
+		ret = find_file_type_lowmem(root, ino, &filetype);
+		if (ret) {
+			ret = guess_file_type_lowmem(root, ino, &filetype);
+			if (ret) {
+				filetype = BTRFS_FT_REG_FILE;
+				error(
+		"can't get file type for inode %llu, using FILE as fallback",
+				      ino);
+			}
+		}
+	}
+
 	btrfs_init_path(&path);
 	trans = btrfs_start_transaction(root, 1);
 	if (IS_ERR(trans)) {
@@ -5172,7 +5188,9 @@ static int repair_inode_item_missing(struct btrfs_root *root, u64 ino,
 	}
 
 	ret = btrfs_search_slot(trans, root, &key, &path, 1, 1);
-	if (ret < 0 || !ret)
+	if (!ret)
+		ret = -EEXIST;
+	if (ret < 0)
 		goto fail;
 
 	/* insert inode item */
