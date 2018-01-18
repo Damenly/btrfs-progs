@@ -4914,6 +4914,58 @@ static void print_inode_ref_err(struct btrfs_root *root, struct btrfs_key *key,
 }
 
 /*
+ * Change inode mode.
+ *
+ * Returns 0 means success.
+ * Returns <0 means error.
+ */
+static int repair_inode_item_mismatch(struct btrfs_root *root, u64 ino,
+				      u8 filetype)
+{
+	struct btrfs_key key;
+	struct btrfs_trans_handle *trans;
+	struct btrfs_path path;
+	struct btrfs_inode_item *ii;
+	u32 mode;
+	int ret;
+
+	key.objectid = ino;
+	key.type = BTRFS_INODE_ITEM_KEY;
+	key.offset = 0;
+
+	btrfs_init_path(&path);
+	trans = btrfs_start_transaction(root, 1);
+	if (IS_ERR(trans)) {
+		ret = -EIO;
+		goto out;
+	}
+
+	ret = btrfs_search_slot(trans, root, &key, &path, 0, 1);
+	if (ret > 0)
+		ret = -ENOENT;
+	if (ret)
+		goto fail;
+
+	ii = btrfs_item_ptr(path.nodes[0], path.slots[0],
+			    struct btrfs_inode_item);
+	mode = btrfs_inode_mode(path.nodes[0], ii);
+	mode &= ~S_IFMT;
+	mode |= btrfs_type_to_imode(filetype);
+
+	btrfs_set_inode_mode(path.nodes[0], ii, mode);
+	btrfs_mark_buffer_dirty(path.nodes[0]);
+	ret = 0;
+fail:
+	btrfs_commit_transaction(trans, root);
+out:
+	btrfs_release_path(&path);
+	if (ret)
+		error("failed to repair root %llu INODE ITEM[%llu] MISMATCH",
+		      root->objectid, ino);
+	return ret;
+}
+
+/*
  * Insert the missing inode item.
  *
  * Returns 0 means success.
