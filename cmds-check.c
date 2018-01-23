@@ -2007,6 +2007,8 @@ static int process_one_leaf_v2(struct btrfs_root *root, struct btrfs_path *path,
 
 	cur_bytenr = cur->start;
 
+	if (repair)
+		goto again;
 	/* skip to first inode item or the first inode number change */
 	nritems = btrfs_header_nritems(cur);
 	for (i = 0; i < nritems; i++) {
@@ -2033,9 +2035,12 @@ again:
 		goto out;
 
 	/* still have inode items in thie leaf */
-	if (cur->start == cur_bytenr)
+	if (cur->start == cur_bytenr) {
+		ret = btrfs_next_item(root, path);
+		if (ret > 0)
+			goto out;
 		goto again;
-
+	}
 	/*
 	 * we have switched to another leaf, above nodes may
 	 * have changed, here walk down the path, if a node
@@ -5709,6 +5714,8 @@ static int repair_dir_item(struct btrfs_root *root, struct btrfs_key *key,
 				      ino);
 			}
 		}
+	} else {
+		true_filetype = filetype;
 	}
 
 	/*
@@ -6478,6 +6485,45 @@ out:
 }
 
 /*
+ * Try insert new inode item frist.
+ * If failed, jump to next inode item.
+ */
+static int handle_inode_item_missing(struct btrfs_root *root,
+				     struct btrfs_path *path)
+{
+	struct btrfs_key key;
+	int ret;
+
+	btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
+
+	ret = repair_inode_item_missing(root, key.objectid, 0);
+	if (!ret) {
+		btrfs_release_path(path);
+		ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+		if (ret)
+			goto next_inode;
+		else
+			goto out;
+	}
+
+next_inode:
+	error("inode item[%llu] is missing, skip to check next inode",
+	      key.objectid);
+	while (1) {
+		ret = btrfs_next_item(root, path);
+		if (ret > 0)
+			goto out;
+		btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
+		if (key.type == BTRFS_INODE_ITEM_KEY) {
+			ret = 0;
+			break;
+		}
+	}
+out:
+	return ret;
+}
+
+/*
  * Check INODE_ITEM and related ITEMs (the same inode number)
  * 1. check link count
  * 2. check inode ref/extref
@@ -6524,6 +6570,13 @@ static int check_inode_item(struct btrfs_root *root, struct btrfs_path *path,
 			err |= LAST_ITEM;
 		return err;
 	}
+	if (key.type != BTRFS_INODE_ITEM_KEY && repair) {
+		ret = handle_inode_item_missing(root, path);
+		if (ret > 0)
+			err |= LAST_ITEM;
+		if (ret)
+			return err;
+	}
 
 	ii = btrfs_item_ptr(node, slot, struct btrfs_inode_item);
 	isize = btrfs_inode_size(node, ii);
@@ -6549,7 +6602,6 @@ static int check_inode_item(struct btrfs_root *root, struct btrfs_path *path,
 		btrfs_item_key_to_cpu(node, &key, slot);
 		if (key.objectid != inode_id)
 			goto out;
-
 		switch (key.type) {
 		case BTRFS_INODE_REF_KEY:
 			ret = check_inode_ref(root, &key, path, namebuf,
@@ -6596,12 +6648,10 @@ static int check_inode_item(struct btrfs_root *root, struct btrfs_path *path,
 	}
 
 out:
-	if (err & LAST_ITEM) {
-		btrfs_release_path(path);
-		ret = btrfs_search_slot(NULL, root, &last_key, path, 0, 0);
-		if (ret)
-			return err;
-	}
+	btrfs_release_path(path);
+	ret = btrfs_search_slot(NULL, root, &last_key, path, 0, 0);
+	if (ret)
+		return err;
 
 	/* verify INODE_ITEM nlink/isize/nbytes */
 	if (dir) {
