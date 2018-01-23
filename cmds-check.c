@@ -5919,7 +5919,7 @@ begin:
 				path->slots[0]--;
 		}
 		if (ret)
-			goto out;
+			return err;
 	}
 
 	node = path->nodes[0];
@@ -6028,7 +6028,7 @@ next:
 			break;
 		}
 	}
-out:
+
 	/* research path */
 	btrfs_release_path(path);
 	ret = btrfs_search_slot(NULL, root, di_key, path, 0, 0);
