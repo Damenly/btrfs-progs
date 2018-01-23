@@ -5989,7 +5989,7 @@ begin:
 
 		/* check relative INDEX/ITEM */
 		key.objectid = di_key->objectid;
-		if (key.type == BTRFS_DIR_ITEM_KEY) {
+		if (di_key->type == BTRFS_DIR_ITEM_KEY) {
 			key.type = BTRFS_DIR_INDEX_KEY;
 			key.offset = index;
 		} else {
