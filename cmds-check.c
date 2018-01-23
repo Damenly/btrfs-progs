@@ -5972,15 +5972,12 @@ begin:
 		ret = btrfs_search_slot(NULL, root, &location, path, 0, 0);
 		if (ret) {
 			tmp_err |= INODE_ITEM_MISSING;
-			goto next;
-		}
-
-		ii = btrfs_item_ptr(path->nodes[0], path->slots[0],
-				    struct btrfs_inode_item);
-		mode = btrfs_inode_mode(path->nodes[0], ii);
-		if (imode_to_type(mode) != filetype) {
-			tmp_err |= INODE_ITEM_MISMATCH;
-			goto next;
+		} else {
+			ii = btrfs_item_ptr(path->nodes[0], path->slots[0],
+					    struct btrfs_inode_item);
+			mode = btrfs_inode_mode(path->nodes[0], ii);
+			if (imode_to_type(mode) != filetype)
+				tmp_err |= INODE_ITEM_MISMATCH;
 		}
 
 		/* Check relative INODE_REF/INODE_EXTREF */
