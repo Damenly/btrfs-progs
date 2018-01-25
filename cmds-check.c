@@ -3192,6 +3192,7 @@ static int repair_inode_backrefs(struct btrfs_root *root,
 				ret = create_inode_item(root, rec, 1);
 				if (ret)
 					break;
+				rec->found_inode_item = 1;
 				repaired++;
 			}
 		}
@@ -3268,6 +3269,8 @@ static int repair_inode_backrefs(struct btrfs_root *root,
 						    backref->index);
 			BUG_ON(ret);
 			btrfs_commit_transaction(trans, root);
+			backref->found_dir_index = 1;
+			backref->found_dir_item = 1;
 			repaired++;
 		}
 
@@ -3279,6 +3282,7 @@ static int repair_inode_backrefs(struct btrfs_root *root,
 			ret = create_inode_item(root, rec, 0);
 			if (ret)
 				break;
+			rec->found_inode_item = 1;
 			repaired++;
 		}
 
