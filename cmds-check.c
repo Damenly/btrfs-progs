@@ -3966,6 +3966,7 @@ static int repair_inode_discount_extent(struct btrfs_trans_handle *trans,
 		if (ret < 0)
 			goto out;
 	}
+	rec->errors &= ~I_ERR_FILE_EXTENT_DISCOUNT;
 	printf("Fixed discount file extents for inode: %llu in root: %llu\n",
 	       rec->ino, root->objectid);
 out:
