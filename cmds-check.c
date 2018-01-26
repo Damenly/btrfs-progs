@@ -5856,6 +5856,35 @@ out:
 	return ret;
 }
 
+static int get_dir_isize(struct btrfs_root *root, u64 ino, u64 *size_ret)
+{
+	struct btrfs_inode_item *ii;
+	struct btrfs_key key;
+	struct btrfs_path path;
+	int ret;
+
+	key.objectid = ino;
+	key.type = BTRFS_INODE_ITEM_KEY;
+	key.offset = 0;
+
+	btrfs_init_path(&path);
+	ret = btrfs_search_slot(NULL, root, &key, &path, 0, 0);
+	if (ret > 0)
+		ret = -ENOENT;
+	if (ret)
+		goto out;
+
+	ii = btrfs_item_ptr(path.nodes[0], path.slots[0],
+			    struct btrfs_inode_item);
+	*size_ret = btrfs_inode_size(path.nodes[0], ii);
+	ret = 0;
+out:
+	if (ret)
+		error("failed to get isize of inode %llu root %llu",
+		      ino, root->root_key.objectid);
+	return ret;
+}
+
 /*
  * Traverse the given DIR_ITEM/DIR_INDEX and check related INODE_ITEM and
  * call find_inode_ref() to check related INODE_REF/INODE_EXTREF.
@@ -6579,6 +6608,7 @@ out:
 		if (repair && (err & DIR_COUNT_AGAIN)) {
 			err &= ~DIR_COUNT_AGAIN;
 			count_dir_isize(root, inode_id, &size);
+			get_dir_isize(root, inode_id, &isize);
 		}
 
 		if ((nlink != 1 || refs != 1) && repair) {
