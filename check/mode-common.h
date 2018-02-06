@@ -134,4 +134,6 @@ bool is_super_size_valid(struct btrfs_fs_info *fs_info);
 int check_space_cache(struct btrfs_root *root);
 int check_csums(struct btrfs_root *root);
 int recow_extent_buffer(struct btrfs_root *root, struct extent_buffer *eb);
+int exclude_metadata_blocks(struct btrfs_fs_info *fs_info);
+void cleanup_excluded_extents(struct btrfs_fs_info *fs_info);
 #endif
