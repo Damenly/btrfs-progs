@@ -706,7 +706,7 @@ out:
  * Using fs and other trees to rebuild extent tree.
  */
 int reinit_extent_tree(struct btrfs_trans_handle *trans,
-		       struct btrfs_fs_info *fs_info)
+		       struct btrfs_fs_info *fs_info, bool pin)
 {
 	u64 start = 0;
 	int ret;
@@ -728,13 +728,26 @@ int reinit_extent_tree(struct btrfs_trans_handle *trans,
 
 	/*
 	 * first we need to walk all of the trees except the extent tree and pin
-	 * down the bytes that are in use so we don't overwrite any existing
-	 * metadata.
+	 * down/exclude the bytes that are in use so we don't overwrite any
+	 * existing metadata.
+	 * If pin, unpin will be done in end of transaction.
+	 * If exclude, cleanup will be done in check_chunks_and_extents_lowmem.
 	 */
-	ret = pin_metadata_blocks(fs_info);
-	if (ret) {
-		fprintf(stderr, "error pinning down used bytes\n");
-		return ret;
+again:
+	if (pin) {
+		ret = pin_metadata_blocks(fs_info);
+		if (ret) {
+			fprintf(stderr, "error pinning down used bytes\n");
+			return ret;
+		}
+	} else {
+		ret = exclude_metadata_blocks(fs_info);
+		if (ret) {
+			fprintf(stderr, "error excluding used bytes\n");
+			printf("try to pin down used bytes\n");
+			pin = true;
+			goto again;
+		}
 	}
 
 	/*

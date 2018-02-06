@@ -453,7 +453,8 @@ int cmd_check(int argc, char **argv)
 
 		if (init_extent_tree) {
 			printf("Creating a new extent tree\n");
-			ret = reinit_extent_tree(trans, info);
+			ret = reinit_extent_tree(trans, info,
+					 check_mode == CHECK_MODE_ORIGINAL);
 			err |= !!ret;
 			if (ret)
 				goto close_out;

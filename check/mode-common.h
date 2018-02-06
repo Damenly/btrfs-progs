@@ -122,7 +122,7 @@ int check_child_node(struct extent_buffer *parent, int slot,
 void reset_cached_block_groups(struct btrfs_fs_info *fs_info);
 int zero_log_tree(struct btrfs_root *root);
 int reinit_extent_tree(struct btrfs_trans_handle *trans,
-		       struct btrfs_fs_info *fs_info);
+		       struct btrfs_fs_info *fs_info, bool pin);
 int btrfs_fsck_reinit_root(struct btrfs_trans_handle *trans,
 			   struct btrfs_root *root, int overwrite);
 int fill_csum_tree(struct btrfs_trans_handle *trans,
