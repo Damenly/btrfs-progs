@@ -2734,6 +2734,8 @@ static int check_inode_recs(struct btrfs_root *root,
 				backref->errors |= REF_ERR_NO_DIR_INDEX;
 			if (!backref->found_inode_ref)
 				backref->errors |= REF_ERR_NO_INODE_REF;
+			if (!backref->errors)
+				continue;
 			fprintf(stderr, "\tunresolved ref dir %llu index %llu"
 				" namelen %u name %s filetype %d errors %x",
 				(unsigned long long)backref->dir,
