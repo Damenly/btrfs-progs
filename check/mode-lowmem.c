@@ -31,6 +31,7 @@
 
 static u64 last_allocated_chunk;
 struct btrfs_key _start_key = { 0 };
+struct btrfs_key _spec_key = {(u64)-1, (u8)-1, (u64)-1};
 u64 _tree_id = (u64)-1;
 
 static int calc_extent_flag(struct btrfs_root *root, struct extent_buffer *eb,
@@ -3681,6 +3682,12 @@ static int check_extent_data_backref(struct btrfs_fs_info *fs_info,
 
 		if (slot >= btrfs_header_nritems(leaf))
 			goto next;
+		btrfs_item_key_to_cpu(leaf, &key, slot);
+		if (key.objectid > 374857) {
+			warning("debug: checking extent data [%llu %u %llu] at root %llu leaf %llu flags: %llu\n",
+				key.objectid, key.type, key.offset, root->objectid,
+				leaf->start, btrfs_header_flags(leaf));
+		}
 		/*
 		 * For tree blocks have been relocated, data backref are
 		 * shared instead of keyed. Do not account it.
@@ -3715,7 +3722,6 @@ static int check_extent_data_backref(struct btrfs_fs_info *fs_info,
 		    (u64)(key.offset - btrfs_file_extent_offset(leaf, fi)) ==
 		    offset)
 			found_count++;
-
 next:
 		ret = btrfs_next_item(root, &path);
 		if (ret)
@@ -3865,6 +3871,7 @@ static int check_extent_item(struct btrfs_fs_info *fs_info,
 	int metadata = 0;
 	int level;
 	struct btrfs_key key;
+	
 	int ret;
 	int err = 0;
 
@@ -3935,6 +3942,12 @@ next:
 	iref = (struct btrfs_extent_inline_ref *)ptr;
 	type = btrfs_extent_inline_ref_type(eb, iref);
 	offset = btrfs_extent_inline_ref_offset(eb, iref);
+
+	if (key.objectid > _spec_key.objectid && key.offset > _spec_key.offset) {
+		warning("debug: checking extent item[%llu %u %llu] type: %u offset: %llu\n",
+			key.objectid, key.type, key.offset, type, offset);
+	}
+	
 	switch (type) {
 	case BTRFS_TREE_BLOCK_REF_KEY:
 		root_objectid = offset;
@@ -3972,6 +3985,11 @@ next:
 		goto out;
 	}
 
+	if (key.objectid > _spec_key.objectid && key.offset > _spec_key.offset) {
+		warning("debug: end of checking extent item[%llu %u %llu] type: %u offset: %llu\n",
+		      key.objectid, key.type, key.offset, type, offset);
+	}
+	
 	if (err && repair) {
 		ret = repair_extent_item(fs_info->extent_root, path,
 			 key.objectid, num_bytes, parent, root_objectid,

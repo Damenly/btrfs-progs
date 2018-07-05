@@ -3536,8 +3536,7 @@ static int do_check_fs_roots(struct btrfs_fs_info *fs_info,
 {
 	int ret;
 
-	if (!ctx.progress_enabled)
-		fprintf(stderr, "checking fs roots\n");
+	fprintf(stderr, "checking fs roots\n");
 	if (check_mode == CHECK_MODE_LOWMEM)
 		ret = check_fs_roots_lowmem(fs_info);
 	else
@@ -9482,6 +9481,7 @@ const char * const cmd_check_usage[] = {
 	"--clear-space-cache v1|v2   clear space cache for v1 or v2",
 	"-t <tree_id>		     tree id want lowmem mode to scan",
 	"-k <u64,u8,u64>	     key want lowmem mode to start to scan",
+	"-x <u64,u8,u64>	     debug only",
 	NULL
 };
 
@@ -9538,10 +9538,11 @@ int cmd_check(int argc, char **argv)
 			{ "force", no_argument, NULL, GETOPT_VAL_FORCE },
 			{ "tree-id", required_argument, NULL, 't' },
 			{ "key", required_argument, NULL, 'k' },
+			{ "spec_key", required_argument, NULL, 'x' },
 			{ NULL, 0, NULL, 0}
 		};
 
-		c = getopt_long(argc, argv, "as:br:pEQt:k:", long_options, NULL);
+		c = getopt_long(argc, argv, "as:br:pEQt:k:x:", long_options, NULL);
 		if (c < 0)
 			break;
 		switch(c) {
@@ -9572,6 +9573,9 @@ int cmd_check(int argc, char **argv)
 				break;
 			case 'k':
 				parse_key(&_start_key);
+				break;
+			case 'x':
+				parse_key(&_spec_key);
 				break;
 			case 'r':
 				tree_root_bytenr = arg_strtou64(optarg);
@@ -9825,7 +9829,7 @@ int cmd_check(int argc, char **argv)
 		err |= !!ret;
 		goto close_out;
 	}
-
+/*
 	if (!init_extent_tree) {
 		ret = repair_root_items(info);
 		if (ret < 0) {
@@ -9847,7 +9851,7 @@ int cmd_check(int argc, char **argv)
 			goto close_out;
 		}
 	}
-
+*/
 	ret = do_check_chunks_and_extents(info);
 	err |= !!ret;
 	if (ret)
