@@ -47,20 +47,6 @@
 #include "check/mode-original.h"
 #include "check/mode-lowmem.h"
 
-enum task_position {
-	TASK_EXTENTS,
-	TASK_FREE_SPACE,
-	TASK_FS_ROOTS,
-	TASK_NOTHING, /* have to be the last element */
-};
-
-struct task_ctx {
-	int progress_enabled;
-	enum task_position tp;
-
-	struct task_info *info;
-};
-
 u64 bytes_used = 0;
 u64 total_csum_bytes = 0;
 u64 total_btree_bytes = 0;
@@ -177,10 +163,9 @@ static int compare_extent_backref(struct rb_node *node1, struct rb_node *node2)
 static void *print_status_check(void *p)
 {
 	struct task_ctx *priv = p;
-	const char work_indicator[] = { '.', 'o', 'O', 'o' };
-	uint32_t count = 0;
 	static char *task_position_string[] = {
-		"checking extents",
+		"checking extent items",
+		"checking tree backrefs"
 		"checking free space cache",
 		"checking fs roots",
 	};
@@ -191,9 +176,26 @@ static void *print_status_check(void *p)
 		return NULL;
 
 	while (1) {
-		printf("%s [%c]\r", task_position_string[priv->tp],
-				work_indicator[count % 4]);
-		count++;
+		if (priv->tp == TASK_EXTENTS)
+			printf("%s [%llu/%llu]\t\t\t\r",
+			       task_position_string[priv->tp],
+			       priv->current_key.objectid, priv->last_key.objectid);
+		/*
+		else if (priv->tp == TASK_TREE_BACKREFS)
+			printf("%s tree: [%llu/%llu] current: [%llu/%llu]\t\t\t\r",
+			       task_position_string[priv->tp],
+			       priv->current_tree, priv->total_tree,
+			       priv->current_key.objectid, priv->last_key.objectid);
+		else if (priv->tp == TASK_FS_ROOTS)
+			printf("%s fs tree: [%llu/%llu] ino: [%llu/%llu]\t\t\t\r",
+			       task_position_string[priv->tp],
+			       priv->current_tree, priv->total_tree,
+			       priv->current_key.objectid, priv->last_key.objectid);
+		
+		else
+			printf("%s [%llu/%llu]\t\t\t\r", task_position_string[priv->tp],
+			       priv->current_key.objectid, priv->last_key.objectid);
+		*/
 		fflush(stdout);
 		task_period_wait(priv->info);
 	}

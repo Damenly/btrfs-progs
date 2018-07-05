@@ -25,6 +25,7 @@
 #include "internal.h"
 #include "utils.h"
 #include "volumes.h"
+#include "task-utils.h"
 #include "check/mode-common.h"
 #include "check/mode-lowmem.h"
 
@@ -2409,6 +2410,8 @@ static int check_inode_item(struct btrfs_root *root, struct btrfs_path *path)
 		node = path->nodes[0];
 		slot = path->slots[0];
 		btrfs_item_key_to_cpu(node, &key, slot);
+		if (ctx.progress_enabled)
+			btrfs_item_key_to_cpu(node, &ctx.current_key, slot);
 		if (key.objectid != inode_id)
 			goto out;
 
@@ -4355,6 +4358,8 @@ again:
 	}
 
 	btrfs_item_key_to_cpu(eb, &key, slot);
+	if (ctx.progress_enabled)
+		btrfs_item_key_to_cpu(eb, &ctx.current_key, slot);
 	type = key.type;
 
 	switch (type) {
@@ -4749,6 +4754,27 @@ out:
 	return ret < 0 ? ret : err;
 }
 
+void task_set_last(struct btrfs_root *root, struct task_ctx *ctx)
+{
+	int ret;
+	struct btrfs_key key;
+	struct btrfs_path path;
+
+	key.objectid = (u64)-1;
+	key.offset = (u8)-1;
+	key.offset = (u64)-1;
+	btrfs_init_path(&path);
+
+	ret = btrfs_search_slot(NULL, root, &key, &path, 0, 0);
+	ASSERT(ret);
+
+	path.slots[0]--;
+	btrfs_item_key_to_cpu(path.nodes[0], &ctx->last_key, path.slots[0]);
+
+	btrfs_release_path(&path);
+	return ;
+}
+
 /*
  * This function calls walk_down_tree and walk_up_tree to check tree
  * blocks and integrity of fs tree items.
@@ -4769,6 +4795,16 @@ static int check_btrfs_root(struct btrfs_root *root, int check_all)
 	int level;
 	int err = 0;
 
+	if (ctx.progress_enabled &&
+	    root->objectid == BTRFS_EXTENT_TREE_OBJECTID) {
+		ctx.current_tree++;
+		task_set_last(root, &ctx);
+
+		ctx.tp = TASK_EXTENTS;
+		task_start(ctx.info);
+
+	}
+	
 	memset(&nrefs, 0, sizeof(nrefs));
 	if (!check_all) {
 		/*
@@ -4781,8 +4817,7 @@ static int check_btrfs_root(struct btrfs_root *root, int check_all)
 		if (ret < 0)
 			return FATAL_ERROR;
 	}
-
-
+	
 	level = btrfs_header_level(root->node);
 	btrfs_init_path(&path);
 
@@ -4932,6 +4967,48 @@ out:
 	return err;
 }
 
+/*b
+static u64 count_fs_roots(struct btrfs_fs_info *fs_info)
+{
+	struct btrfs_root *tree_root = fs_info->tree_root;
+	struct btrfs_path path;
+	struct btrfs_key key;
+	struct extent_buffer *node;
+	int slot;
+	int ret;
+	u64 count = 0;
+
+	btrfs_init_path(&path);
+	key.objectid = BTRFS_FS_TREE_OBJECTID;
+	key.offset = 0;
+	key.type = BTRFS_ROOT_ITEM_KEY;
+
+	ret = btrfs_search_slot(NULL, tree_root, &key, &path, 0, 0);
+	if (ret)
+		goto out;
+
+	while (1) {
+		node = path.nodes[0];
+		slot = path.slots[0];
+		btrfs_item_key_to_cpu(node, &key, slot);
+		if (key.objectid > BTRFS_LAST_FREE_OBJECTID)
+			goto out;
+		if (key.type == BTRFS_ROOT_ITEM_KEY &&
+		    fs_root_objectid(key.objectid)) {
+			++count;
+		}
+
+		ret = btrfs_next_item(tree_root, &path);
+		if (ret)
+			goto out;
+	}
+
+out:
+	btrfs_release_path(&path);
+	return count;
+}
+*/
+
 /*
  * Check all fs/file tree in low_memory mode.
  *
@@ -4951,6 +5028,10 @@ int check_fs_roots_lowmem(struct btrfs_fs_info *fs_info)
 	int ret;
 	int err = 0;
 
+	if (ctx.progress_enabled) {
+//		ctx.total_tree = count_fs_roots(fs_info);
+//		task_start(ctx.info);
+	}
 	btrfs_init_path(&path);
 	key.objectid = BTRFS_FS_TREE_OBJECTID;
 	key.offset = 0;
@@ -5014,6 +5095,42 @@ out:
 }
 
 /*
+static u64 count_roots(struct btrfs_fs_info *fs_info)
+{
+	u64 count = 0;
+	struct btrfs_path path;
+	struct btrfs_key key;
+	struct btrfs_root *root = fs_info->tree_root;
+	int ret;
+	
+	btrfs_init_path(&path);
+	key.objectid = BTRFS_EXTENT_TREE_OBJECTID;
+	key.offset = 0;
+	key.type = BTRFS_ROOT_ITEM_KEY;
+
+	ret = btrfs_search_slot(NULL, root, &key, &path, 0, 0);
+	if (ret) {
+		error("cannot find extent tree in tree_root");
+		goto out;
+	}
+
+	while (1) {
+		btrfs_item_key_to_cpu(path.nodes[0], &key, path.slots[0]);
+		if (key.type != BTRFS_ROOT_ITEM_KEY)
+			goto next;
+		++count;
+next:
+		ret = btrfs_next_item(root, &path);
+		if (ret)
+			goto out;
+	}
+out:
+	btrfs_release_path(&path);
+	return count;
+}
+*/
+
+/*
  * Low memory usage version check_chunks_and_extents.
  */
 int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info)
@@ -5026,6 +5143,16 @@ int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info)
 	struct btrfs_root *cur_root;
 	int err = 0;
 	int ret;
+
+	if (ctx.progress_enabled) {
+		memset(&ctx.current_key, 0, sizeof(ctx.current_key));
+		memset(&ctx.last_key, 0, sizeof(ctx.current_key));
+		ctx.current_tree = 0;
+		ctx.tp = TASK_TREE_BACKREFS;
+//		ctx.total_tree = 2 + count_roots(fs_info);
+
+//		task_start(ctx.info);
+	}
 
 	root = fs_info->fs_root;
 
@@ -5067,6 +5194,9 @@ int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info)
 
 		ret = check_btrfs_root(cur_root, 1);
 		err |= ret;
+
+		if (ctx.progress_enabled)
+			task_stop(ctx.info);
 
 		if (key.objectid == BTRFS_TREE_RELOC_OBJECTID)
 			btrfs_free_fs_root(cur_root);

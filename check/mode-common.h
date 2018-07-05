@@ -38,6 +38,25 @@ struct node_refs {
 	int full_backref[BTRFS_MAX_LEVEL];
 };
 
+enum task_position {
+	TASK_EXTENTS,
+	TASK_TREE_BACKREFS,
+	TASK_FREE_SPACE,
+	TASK_FS_ROOTS,
+	TASK_NOTHING, /* have to be the last element */
+};
+
+struct task_ctx {
+	int progress_enabled;
+	enum task_position tp;
+
+	struct task_info *info;
+	struct btrfs_key current_key;
+	struct btrfs_key last_key;
+	u64 current_tree;
+	u64 total_tree;
+};
+
 extern u64 bytes_used;
 extern u64 total_csum_bytes;
 extern u64 total_btree_bytes;
@@ -54,6 +73,7 @@ extern int check_data_csum;
 extern struct btrfs_fs_info *global_info;
 extern struct task_ctx ctx;
 extern struct cache_tree *roots_info_cache;
+extern struct task_ctx ctx;
 
 static inline u8 imode_to_type(u32 imode)
 {
