@@ -30,6 +30,8 @@
 #include "check/mode-lowmem.h"
 
 static u64 last_allocated_chunk;
+struct btrfs_key _start_key = { 0 };
+u64 _tree_id;
 
 static int calc_extent_flag(struct btrfs_root *root, struct extent_buffer *eb,
 			    u64 *flags_ret)

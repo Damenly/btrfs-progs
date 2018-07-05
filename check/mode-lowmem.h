@@ -66,4 +66,6 @@
 int check_fs_roots_lowmem(struct btrfs_fs_info *fs_info);
 int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info);
 
+extern struct btrfs_key _start_key;
+extern u64 _tree_id;
 #endif

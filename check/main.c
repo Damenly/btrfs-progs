@@ -9469,6 +9469,8 @@ const char * const cmd_check_usage[] = {
 	"--chunk-root <bytenr>       use the given bytenr for the chunk tree root",
 	"-p|--progress               indicate progress",
 	"--clear-space-cache v1|v2   clear space cache for v1 or v2",
+	"-t <tree_id>		     tree id want lowmem mode to scan",
+	"-k <u64,u8,u64>	     key want lowmem mode to start to scan",
 	NULL
 };
 
@@ -9500,7 +9502,7 @@ int cmd_check(int argc, char **argv)
 			GETOPT_VAL_INIT_EXTENT, GETOPT_VAL_CHECK_CSUM,
 			GETOPT_VAL_READONLY, GETOPT_VAL_CHUNK_TREE,
 			GETOPT_VAL_MODE, GETOPT_VAL_CLEAR_SPACE_CACHE,
-			GETOPT_VAL_FORCE };
+		       GETOPT_VAL_FORCE};
 		static const struct option long_options[] = {
 			{ "super", required_argument, NULL, 's' },
 			{ "repair", no_argument, NULL, GETOPT_VAL_REPAIR },
@@ -9523,10 +9525,12 @@ int cmd_check(int argc, char **argv)
 			{ "clear-space-cache", required_argument, NULL,
 				GETOPT_VAL_CLEAR_SPACE_CACHE},
 			{ "force", no_argument, NULL, GETOPT_VAL_FORCE },
+			{ "tree-id", required_argument, NULL, 't' },
+			{ "key", required_argument, NULL, 'k' },
 			{ NULL, 0, NULL, 0}
 		};
 
-		c = getopt_long(argc, argv, "as:br:pEQ", long_options, NULL);
+		c = getopt_long(argc, argv, "as:br:pEQt:k:", long_options, NULL);
 		if (c < 0)
 			break;
 		switch(c) {
@@ -9552,6 +9556,9 @@ int cmd_check(int argc, char **argv)
 			case 'E':
 				subvolid = arg_strtou64(optarg);
 				break;
+		case 't':
+			subvolid = arg_strtou64(optarg);
+			break;
 			case 'r':
 				tree_root_bytenr = arg_strtou64(optarg);
 				break;
