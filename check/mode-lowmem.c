@@ -31,7 +31,7 @@
 
 static u64 last_allocated_chunk;
 struct btrfs_key _start_key = { 0 };
-u64 _tree_id;
+u64 _tree_id = (u64)-1;
 
 static int calc_extent_flag(struct btrfs_root *root, struct extent_buffer *eb,
 			    u64 *flags_ret)
@@ -4823,6 +4823,18 @@ static int check_btrfs_root(struct btrfs_root *root, int check_all)
 	level = btrfs_header_level(root->node);
 	btrfs_init_path(&path);
 
+	if (_tree_id == root->objectid) {
+		struct btrfs_key tmp = { 0 };
+		if (memcmp(&_start_key, &tmp, sizeof(tmp))) {
+			level = 0;
+			ret = btrfs_search_slot(NULL, root, &_start_key, &path, 0, 0);
+			if (ret < 0)
+				goto out;
+			ret = 0;
+			goto traverse;
+		}
+	}
+
 	if (btrfs_root_refs(root_item) > 0 ||
 	    btrfs_disk_key_objectid(&root_item->drop_progress) == 0) {
 		path.nodes[level] = root->node;
@@ -4840,6 +4852,7 @@ static int check_btrfs_root(struct btrfs_root *root, int check_all)
 		ret = 0;
 	}
 
+traverse:
 	while (1) {
 		ret = walk_down_tree(root, &path, &level, &nrefs, check_all);
 
@@ -5158,6 +5171,11 @@ int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info)
 
 	root = fs_info->fs_root;
 
+	if (_tree_id != (u64)-1) {
+		root1 = root->fs_info->tree_root;
+		goto check_extent_tree;
+	}
+
 	root1 = root->fs_info->chunk_root;
 	ret = check_btrfs_root(root1, 1);
 	err |= ret;
@@ -5166,6 +5184,7 @@ int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info)
 	ret = check_btrfs_root(root1, 1);
 	err |= ret;
 
+check_extent_tree:
 	btrfs_init_path(&path);
 	key.objectid = BTRFS_EXTENT_TREE_OBJECTID;
 	key.offset = 0;
@@ -5180,6 +5199,8 @@ int check_chunks_and_extents_lowmem(struct btrfs_fs_info *fs_info)
 	while (1) {
 		btrfs_item_key_to_cpu(path.nodes[0], &key, path.slots[0]);
 		if (key.type != BTRFS_ROOT_ITEM_KEY)
+			goto next;
+		if (_tree_id != (u64)-1 && key.objectid != _tree_id)
 			goto next;
 		old_key = key;
 		key.offset = (u64)-1;

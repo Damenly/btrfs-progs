@@ -9440,6 +9440,17 @@ close_out:
 	return ret;
 }
 
+static void parse_key(struct btrfs_key *key)
+{
+
+	int ret = sscanf(optarg, "%llu,%hhu,%llu", &key->objectid,
+			 &key->type, &key->offset);
+	if (ret != 3) {
+	        fprintf(stderr, "error parsing key '%s': %d\n", optarg, errno);
+		exit(1);
+	}
+}
+
 const char * const cmd_check_usage[] = {
 	"btrfs check [options] <device>",
 	"Check structural integrity of a filesystem (unmounted).",
@@ -9556,9 +9567,12 @@ int cmd_check(int argc, char **argv)
 			case 'E':
 				subvolid = arg_strtou64(optarg);
 				break;
-		case 't':
-			subvolid = arg_strtou64(optarg);
-			break;
+			case 't':
+				_tree_id = arg_strtou64(optarg);
+				break;
+			case 'k':
+				parse_key(&_start_key);
+				break;
 			case 'r':
 				tree_root_bytenr = arg_strtou64(optarg);
 				break;
