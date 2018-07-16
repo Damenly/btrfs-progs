@@ -184,6 +184,21 @@ static u64 treeid_from_string(const char *str, const char **end)
 	return id;
 }
 
+static int parse_key(struct btrfs_key *key)
+{
+
+	int ret = sscanf(optarg, "%llu,%hhu,%llu", &key->objectid,
+			 &key->type, &key->offset);
+	if (ret != 3) {
+		error("error parsing key '%s'\n", optarg);
+		ret = -EINVAL;
+	} else {
+		ret = 0;
+	}
+
+	return ret;
+}
+
 const char * const cmd_inspect_dump_tree_usage[] = {
 	"btrfs inspect-internal dump-tree [options] device",
 	"Dump tree structures from a given device",
@@ -199,6 +214,7 @@ const char * const cmd_inspect_dump_tree_usage[] = {
 	"-u|--uuid              print only the uuid tree",
 	"-b|--block <block_num> print info from the specified block only",
 	"-t|--tree <tree_id>    print only tree with the given id (string or number)",
+	"-k|--key <u64,u8,u64>  search the specific key then print path, must with -t(conflicts with others)",
 	"--follow               use with -b, to show all children tree blocks of <block_num>",
 	NULL
 };
@@ -224,8 +240,10 @@ int cmd_inspect_dump_tree(int argc, char **argv)
 	unsigned open_ctree_flags;
 	u64 block_only = 0;
 	struct btrfs_root *tree_root_scan;
+	struct btrfs_key spec_key = { 0 };
 	u64 tree_id = 0;
 	bool follow = false;
+	bool is_spec_key_set = false;
 
 	/*
 	 * For debug-tree, we care nothing about extent tree (it's just backref
@@ -248,10 +266,11 @@ int cmd_inspect_dump_tree(int argc, char **argv)
 			{ "block", required_argument, NULL, 'b'},
 			{ "tree", required_argument, NULL, 't'},
 			{ "follow", no_argument, NULL, GETOPT_VAL_FOLLOW },
+			{ "key", required_argument, NULL, 'k'},
 			{ NULL, 0, NULL, 0 }
 		};
 
-		c = getopt_long(argc, argv, "deb:rRut:", long_options, NULL);
+		c = getopt_long(argc, argv, "deb:rRut:k:", long_options, NULL);
 		if (c < 0)
 			break;
 		switch (c) {
@@ -300,6 +319,12 @@ int cmd_inspect_dump_tree(int argc, char **argv)
 			}
 			break;
 			}
+		case 'k':
+			ret = parse_key(&spec_key);
+			if (ret)
+				exit(1);
+			is_spec_key_set = true;
+			break;
 		case GETOPT_VAL_FOLLOW:
 			follow = true;
 			break;
@@ -307,6 +332,9 @@ int cmd_inspect_dump_tree(int argc, char **argv)
 			usage(cmd_inspect_dump_tree_usage);
 		}
 	}
+
+	if (!tree_id && is_spec_key_set)
+		usage(cmd_inspect_dump_tree_usage);
 
 	if (check_argc_exact(argc - optind, 1))
 		usage(cmd_inspect_dump_tree_usage);
@@ -325,6 +353,17 @@ int cmd_inspect_dump_tree(int argc, char **argv)
 		goto out;
 	}
 
+	if (is_spec_key_set) {
+		root = info->tree_root;
+		if (IS_ERR(root) || !root) {
+			ret = root ? PTR_ERR(root) : -1;
+			error("unable to open %s", argv[optind]);
+			goto out;
+		}
+
+		btrfs_search_print_path(info, tree_id, &spec_key);
+		goto close_root;
+	}
 	if (block_only) {
 		root = info->chunk_root;
 		leaf = read_tree_block(info, block_only, 0);

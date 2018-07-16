@@ -26,4 +26,6 @@ void print_chunk_item(struct extent_buffer *eb, struct btrfs_chunk *chunk);
 void print_extent_item(struct extent_buffer *eb, int slot, int metadata);
 void print_objectid(FILE *stream, u64 objectid, u8 type);
 void print_key_type(FILE *stream, u64 objectid, u8 type);
+void btrfs_search_print_path(struct btrfs_fs_info *info, u64 root_objectid,
+			     struct btrfs_key *key);
 #endif

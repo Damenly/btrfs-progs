@@ -1459,3 +1459,80 @@ void btrfs_print_tree(struct extent_buffer *eb, int follow)
 
 	return;
 }
+
+void btrfs_search_print_path(struct btrfs_fs_info *fs_info, u64 root_objectid,
+			     struct btrfs_key *skey)
+{
+	int ret;
+	int level;
+	struct btrfs_root *root;
+	struct btrfs_key key;
+	struct extent_buffer *next;
+	struct extent_buffer *eb;
+	struct btrfs_path path;
+
+	key.objectid = root_objectid;
+	key.type = BTRFS_ROOT_ITEM_KEY;
+	key.offset = (u64)-1;
+
+	if (key.objectid == BTRFS_TREE_RELOC_OBJECTID)
+		root = btrfs_read_fs_root_no_cache(fs_info, &key);
+	else
+		root = btrfs_read_fs_root(fs_info, &key);
+
+	if (IS_ERR(root) || !root) {
+		error("failed to read tree: %lld", key.objectid);
+		return;
+	}
+
+	btrfs_init_path(&path);
+	ret = btrfs_search_slot(NULL, root, skey, &path, 0, 0);
+	if (ret < 0) {
+		error("error search the key [%llu, %u, %llu] in root %llu",
+		      skey->objectid, skey->type, skey->offset, root->objectid);
+		goto out;
+	}
+
+	if (ret > 0) {
+		if (path.slots[0] > btrfs_header_nritems(path.nodes[0])) {
+			ret = btrfs_next_item(root, &path);
+			if (ret) {
+				error(
+	"error search the key [%llu, %u, %llu] in root %llu, no next key",
+					skey->objectid, skey->type,
+					skey->offset, root->objectid);
+				goto out;
+			}
+		}
+
+		btrfs_item_key_to_cpu(path.nodes[0], &key, path.slots[0]);
+		printf("next to search key is [%llu, %u, %llu]\n",
+		       key.objectid, key.type, key.offset);
+	}
+
+	level = btrfs_header_level(root->node);
+	for (; level >= 0 ; level--) {
+		eb = path.nodes[level];
+		next = path.nodes[level - 1];
+
+		btrfs_print_tree(path.nodes[level], 0);
+
+		if (level == 0)
+			break;
+		if (btrfs_header_level(next) != btrfs_header_level(eb) - 1) {
+			warning(
+				"eb corrupted: parent bytenr %llu slot %d level %d child bytenr %llu level has %d expect %d, skipping the slot",
+				btrfs_header_bytenr(eb), path.slots[level],
+				btrfs_header_level(eb),
+				btrfs_header_bytenr(next),
+				btrfs_header_level(next),
+				btrfs_header_level(eb) - 1);
+			continue;
+		}
+	}
+
+out:
+	if (root_objectid == BTRFS_TREE_RELOC_OBJECTID)
+		btrfs_free_fs_root(root);
+	btrfs_release_path(&path);
+}
