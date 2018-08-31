@@ -3564,6 +3564,8 @@ static int do_check_fs_roots(struct btrfs_fs_info *fs_info,
 	else
 		ret = check_fs_roots(fs_info, root_cache);
 
+	if (ret)
+		printf("DEBUG: error in checking fs roots ret:\n", ret);
 	return ret;
 }
 

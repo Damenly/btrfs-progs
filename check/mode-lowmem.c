@@ -4803,14 +4803,22 @@ static int check_btrfs_root(struct btrfs_root *root, int check_all)
 		ret = 0;
 	}
 
+	if (ret)
+		printf("DEBUG: error before walking while checking fs root %llu ret %d\n",
+		       root->objectid, ret);
 	while (1) {
 		ctx.item_count++;
 		ret = walk_down_tree(root, &path, &level, &nrefs, check_all);
 
-		if (ret > 0)
+		if (ret > 0) {
+			printf("DEBUG: normal error in walking while checking node %llu fs root %llu ret %d\n",
+			       path.nodes[level]->start, root->objectid, ret);
 			err |= ret;
+		}
 		/* if ret is negative, walk shall stop */
 		if (ret < 0) {
+			printf("DEBUG: fatal error in walking while checking node %llu fs root %llu ret %d\n",
+			       path.nodes[level]->start, root->objectid, ret);
 			ret = err | FATAL_ERROR;
 			break;
 		}
@@ -4990,6 +4998,9 @@ int check_fs_roots_lowmem(struct btrfs_fs_info *fs_info)
 			}
 
 			ret = check_fs_root(cur_root);
+			if (ret)
+				printf("DEBUG: error in checking fs root %llu ret %d\n",
+				       key.objectid, ret);
 			err |= ret;
 
 			if (key.objectid == BTRFS_TREE_RELOC_OBJECTID)
