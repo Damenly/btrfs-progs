@@ -4597,22 +4597,38 @@ static int walk_down_tree(struct btrfs_root *root, struct btrfs_path *path,
 	return err;
 }
 
+/*
+ * Walk up throuh the path. Make path point to next slot to be checked.
+ * walk_down_tree() should be called after this function.
+ *
+ * @root:	root of the tree
+ * @path:	will point to next slot to check for walk_down_tree()
+ * @level:	returns with level of next node to be checked
+ * @is_checked:	means is the current node checked or not
+ *		if false, the slot is unchecked, do not increase the slot
+ *		if true, means increase the slot of the current node
+ *
+ * Returns 0 means success.
+ * Returns >0 means the whole loop of walk up/down should be broken.
+ */
 static int walk_up_tree(struct btrfs_root *root, struct btrfs_path *path,
-			int *level)
+			int *level, bool is_checked)
 {
 	int i;
 	struct extent_buffer *leaf;
+	int skip_cur = is_checked ? 1 : 0;
 
 	for (i = *level; i < BTRFS_MAX_LEVEL - 1 && path->nodes[i]; i++) {
 		leaf = path->nodes[i];
-		if (path->slots[i] + 1 < btrfs_header_nritems(leaf)) {
-			path->slots[i]++;
+		if (path->slots[i] + skip_cur < btrfs_header_nritems(leaf)) {
+			path->slots[i] += skip_cur;
 			*level = i;
 			return 0;
 		}
 		free_extent_buffer(path->nodes[*level]);
 		path->nodes[*level] = NULL;
 		*level = i + 1;
+		skip_cur = 1;
 	}
 	return 1;
 }
@@ -4815,7 +4831,20 @@ static int check_btrfs_root(struct btrfs_root *root, int check_all)
 			break;
 		}
 
-		ret = walk_up_tree(root, &path, &level);
+		/*
+		 * The logical of walk trees are shared between backrefs
+		 * check and fs trees check.
+		 * In checking backrefs(check_all is true), after
+		 * check_leaf_items() returns, path points to
+		 * last checked item.
+		 * In checking fs roots(check_all is false), after
+		 * process_one_leaf() returns, path points to unchecked item.
+		 *
+		 * walk_up_tree() is reponsible to make path point to next
+		 * slot to be checked, above case is handled in
+		 * walk_up_tree().
+		 */
+		ret = walk_up_tree(root, &path, &level, check_all);
 		if (ret != 0) {
 			/* Normal exit, reset ret to err */
 			ret = err;
