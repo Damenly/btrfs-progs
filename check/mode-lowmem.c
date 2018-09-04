@@ -1529,7 +1529,7 @@ static void print_dir_item_err(struct btrfs_root *root, struct btrfs_key *key,
  * call find_inode_ref() to check related INODE_REF/INODE_EXTREF.
  *
  * @root:	the root of the fs/file tree
- * @key:	the key of the INODE_REF/INODE_EXTREF
+ * @di_key:	the key of the dir_item/dir_index
  * @path:       the path
  * @size:	the st_size of the INODE_ITEM
  *
@@ -1540,20 +1540,11 @@ static int check_dir_item(struct btrfs_root *root, struct btrfs_key *di_key,
 			  struct btrfs_path *path, u64 *size)
 {
 	struct btrfs_dir_item *di;
-	struct btrfs_inode_item *ii;
-	struct btrfs_key key;
-	struct btrfs_key location;
 	struct extent_buffer *node;
 	int slot;
 	char namebuf[BTRFS_NAME_LEN] = {0};
 	u32 total;
 	u32 cur = 0;
-	u32 len;
-	u32 name_len;
-	u32 data_len;
-	u8 filetype;
-	u32 mode = 0;
-	u64 index;
 	int ret;
 	int err;
 	int tmp_err;
@@ -1588,6 +1579,15 @@ begin:
 	memset(namebuf, 0, sizeof(namebuf) / sizeof(*namebuf));
 
 	while (cur < total) {
+		struct btrfs_inode_item *ii;
+		struct btrfs_key found_dir_key;
+		struct btrfs_key location;
+		u8 filetype;
+		u32 data_len;
+		u32 name_len;
+		u32 len;
+		u32 mode = 0;
+		u64 index;
 		/*
 		 * For DIR_ITEM set index to (u64)-1, so that find_inode_ref
 		 * ignore index check.
@@ -1651,26 +1651,26 @@ begin:
 		}
 
 		/* Check relative INODE_REF/INODE_EXTREF */
-		key.objectid = location.objectid;
-		key.type = BTRFS_INODE_REF_KEY;
-		key.offset = di_key->objectid;
-		tmp_err |= find_inode_ref(root, &key, namebuf, len, &index);
+	        found_dir_key.objectid = location.objectid;
+		found_dir_key.type = BTRFS_INODE_REF_KEY;
+		found_dir_key.offset = di_key->objectid;
+		tmp_err |= find_inode_ref(root, &found_dir_key, namebuf, len, &index);
 
 		/* check relative INDEX/ITEM */
-		key.objectid = di_key->objectid;
-		if (key.type == BTRFS_DIR_ITEM_KEY) {
-			key.type = BTRFS_DIR_INDEX_KEY;
-			key.offset = index;
+		found_dir_key.objectid = di_key->objectid;
+		if (di_key->type == BTRFS_DIR_ITEM_KEY) {
+			found_dir_key.type = BTRFS_DIR_INDEX_KEY;
+			found_dir_key.offset = index;
 		} else {
-			key.type = BTRFS_DIR_ITEM_KEY;
-			key.offset = btrfs_name_hash(namebuf, name_len);
+			found_dir_key.type = BTRFS_DIR_ITEM_KEY;
+			found_dir_key.offset = btrfs_name_hash(namebuf, name_len);
 		}
 
-		tmp_err |= find_dir_item(root, &key, &location, namebuf,
-					 name_len, filetype);
+		tmp_err |= find_dir_item(root, &found_dir_key, &location,
+					 namebuf, name_len, filetype);
 		/* find_dir_item may find index */
-		if (key.type == BTRFS_DIR_INDEX_KEY)
-			index = key.offset;
+		if (found_dir_key.type == BTRFS_DIR_INDEX_KEY)
+			index = found_dir_key.offset;
 next:
 
 		if (tmp_err && repair) {
