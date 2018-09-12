@@ -4967,9 +4967,13 @@ int check_fs_roots_lowmem(struct btrfs_fs_info *fs_info)
 	}
 
 	while (1) {
+		struct btrfs_key saved_key;
+
 		node = path.nodes[0];
 		slot = path.slots[0];
 		btrfs_item_key_to_cpu(node, &key, slot);
+		if (repair)
+			saved_key = key;
 		if (key.objectid > BTRFS_LAST_FREE_OBJECTID)
 			goto out;
 		if (key.type == BTRFS_ROOT_ITEM_KEY &&
@@ -5000,6 +5004,24 @@ int check_fs_roots_lowmem(struct btrfs_fs_info *fs_info)
 			err |= ret;
 		}
 next:
+		/*
+		 * Since root tree can be cowed during repair,
+		 * here search the saved key again.
+		 */
+		if (repair) {
+			btrfs_release_path(&path);
+			ret = btrfs_search_slot(NULL, fs_info->tree_root,
+						&saved_key, &path, 0, 0);
+			/* Repair never deletes trees, search must succeed. */
+			if (ret > 0)
+				ret = -ENOENT;
+			if (ret) {
+				error(
+			"search root key[%llu %u %llu] failed after repair: %s",
+				      saved_key.objectid, saved_key.type,
+				      saved_key.offset, strerror(-ret));
+			}
+		}
 		ret = btrfs_next_item(tree_root, &path);
 		if (ret > 0)
 			goto out;
