@@ -227,10 +227,11 @@ static int btrfs_find_name_in_ext_backref(struct btrfs_path *path,
 	return 0;
 }
 
-struct btrfs_inode_extref *btrfs_lookup_inode_extref(struct btrfs_trans_handle
-		*trans, struct btrfs_path *path, struct btrfs_root *root,
-		u64 ino, u64 parent_ino, u64 index, const char *name,
-		int namelen, int ins_len)
+struct btrfs_inode_extref *
+btrfs_lookup_inode_extref(struct btrfs_trans_handle *trans,
+			  struct btrfs_root *root, struct btrfs_path *path,
+			  const char *name, int namelen, u64 ino,
+			  u64 parent_ino, int ins_len)
 {
 	struct btrfs_key key;
 	struct btrfs_inode_extref *extref;
