@@ -277,6 +277,7 @@ int btrfs_unlink(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 	struct btrfs_key key;
 	struct btrfs_inode_item *inode_item;
 	struct btrfs_inode_ref *inode_ref;
+	struct btrfs_inode_extref *inode_extref = NULL;
 	struct btrfs_dir_item *dir_item;
 	u64 inode_size;
 	u32 nlinks;
@@ -296,7 +297,18 @@ int btrfs_unlink(struct btrfs_trans_handle *trans, struct btrfs_root *root,
 		ret = PTR_ERR(inode_ref);
 		goto out;
 	}
-	if (inode_ref)
+
+	if (!inode_ref && btrfs_fs_incompat(root->fs_info, EXTENDED_IREF)) {
+		btrfs_release_path(path);
+		inode_extref = btrfs_lookup_inode_extref(trans, root, path,
+					 name, namelen, ino, parent_ino, 0);
+		if (IS_ERR(inode_extref)) {
+			ret = PTR_ERR(inode_extref);
+			goto out;
+		}
+	}
+
+	if (inode_ref || inode_extref)
 		del_inode_ref = 1;
 	btrfs_release_path(path);
 
