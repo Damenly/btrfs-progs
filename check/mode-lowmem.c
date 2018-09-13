@@ -1710,15 +1710,20 @@ out:
 /*
  * Wrapper function of btrfs_punch_hole.
  *
+ * @path:	will point to the item while calling the function.
+ *
  * Returns 0 means success.
  * Returns not 0 means error.
  */
-static int punch_extent_hole(struct btrfs_root *root, u64 ino, u64 start,
-			     u64 len)
+static int punch_extent_hole(struct btrfs_root *root, struct btrfs_path *path,
+			     u64 ino, u64 start, u64 len)
 {
 	struct btrfs_trans_handle *trans;
-	int ret = 0;
+	struct btrfs_key key;
+	int ret;
+	int ret2;
 
+	btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
 	trans = btrfs_start_transaction(root, 1);
 	if (IS_ERR(trans))
 		return PTR_ERR(trans);
@@ -1732,6 +1737,12 @@ static int punch_extent_hole(struct btrfs_root *root, u64 ino, u64 start,
 		       ino);
 
 	btrfs_commit_transaction(trans, root);
+
+	btrfs_release_path(path);
+	ret2 = btrfs_search_slot(NULL, root, &key, path, 0, 0);
+	if (ret2 > 0)
+		ret2 = -ENOENT;
+	ret |= ret2;
 	return ret;
 }
 
@@ -1963,7 +1974,7 @@ static int check_file_extent(struct btrfs_root *root, struct btrfs_path *path,
 	/* Check EXTENT_DATA hole */
 	if (!no_holes && *end != fkey.offset) {
 		if (repair)
-			ret = punch_extent_hole(root, fkey.objectid,
+			ret = punch_extent_hole(root, path, fkey.objectid,
 						*end, fkey.offset - *end);
 		if (!repair || ret) {
 			err |= FILE_EXTENT_ERROR;
@@ -2534,7 +2545,7 @@ out:
 
 		if (!nbytes && !no_holes && extent_end < isize) {
 			if (repair)
-				ret = punch_extent_hole(root, inode_id,
+				ret = punch_extent_hole(root, path, inode_id,
 						extent_end, isize - extent_end);
 			if (!repair || ret) {
 				err |= NBYTES_ERROR;
