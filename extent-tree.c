@@ -196,11 +196,15 @@ static int btrfs_add_block_group_cache(struct btrfs_fs_info *info,
 }
 
 /*
- * This will return the block group at or after bytenr if contains is 0, else
- * it will return the block group that contains the bytenr
+ * This will return the block group which contains @bytenr if it exists.
+ * If found nothing, the return depends on @next.
+ *
+ * @next:
+ *   if 0, return NULL if there's no block group containing the bytenr.
+ *   if 1, return the block group which starts after @bytenr.
  */
 static struct btrfs_block_group_cache *block_group_cache_tree_search(
-		struct btrfs_fs_info *info, u64 bytenr, int contains)
+		struct btrfs_fs_info *info, u64 bytenr, int next)
 {
 	struct btrfs_block_group_cache *cache, *ret = NULL;
 	struct rb_node *n;
@@ -215,11 +219,11 @@ static struct btrfs_block_group_cache *block_group_cache_tree_search(
 		start = cache->key.objectid;
 
 		if (bytenr < start) {
-			if (!contains && (!ret || start < ret->key.objectid))
+			if (next && (!ret || start < ret->key.objectid))
 				ret = cache;
 			n = n->rb_left;
 		} else if (bytenr > start) {
-			if (contains && bytenr <= end) {
+			if (bytenr <= end) {
 				ret = cache;
 				break;
 			}
@@ -229,6 +233,7 @@ static struct btrfs_block_group_cache *block_group_cache_tree_search(
 			break;
 		}
 	}
+
 	return ret;
 }
 
