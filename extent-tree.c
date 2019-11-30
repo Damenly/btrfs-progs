@@ -238,12 +238,13 @@ static struct btrfs_block_group_cache *block_group_cache_tree_search(
 }
 
 /*
- * Return the block group that starts at or after bytenr
+ * Return the block group that contains @bytenr, otherwise return the next one
+ * that starts after @bytenr
  */
 struct btrfs_block_group_cache *btrfs_lookup_first_block_group_kernel(
 		struct btrfs_fs_info *info, u64 bytenr)
 {
-	return block_group_cache_tree_search(info, bytenr, 0);
+	return block_group_cache_tree_search(info, bytenr, 1);
 }
 
 /*
@@ -252,7 +253,7 @@ struct btrfs_block_group_cache *btrfs_lookup_first_block_group_kernel(
 struct btrfs_block_group_cache *btrfs_lookup_block_group_kernel(
 		struct btrfs_fs_info *info, u64 bytenr)
 {
-	return block_group_cache_tree_search(info, bytenr, 1);
+	return block_group_cache_tree_search(info, bytenr, 0);
 }
 
 /*
