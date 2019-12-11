@@ -319,6 +319,35 @@ static struct btrfs_fs_devices *find_fsid_changing_metadata_uuid(
 	return find_fsid(disk_super->fsid, disk_super->metadata_uuid);
 }
 
+static struct btrfs_fs_devices *find_fsid_changing(
+					struct btrfs_super_block *disk_super)
+{
+	struct btrfs_fs_devices *fs_devices;
+
+	/*
+	 * Handles the case where scanned device is part of an fs that had
+	 * multiple successful changes of FSID but currently device didn't
+	 * observe it.
+	 * Since the scanned devices does not own the metadata_uuid feature,
+	 * fsid and metadata_uuid of the changing devices must differ, and
+	 * their metadata_uuid must be same as disk_super->fsid.
+	 */
+	list_for_each_entry(fs_devices, &fs_uuids, list) {
+		if (!fs_devices->fsid_change)
+			continue;
+		if (memcmp(fs_devices->fsid, fs_devices->metadata_uuid,
+			   BTRFS_FSID_SIZE) != 0 &&
+		    memcmp(fs_devices->metadata_uuid, disk_super->fsid,
+			   BTRFS_FSID_SIZE) == 0)
+			return fs_devices;
+	}
+
+	/*
+	 * Back to find newer fs_devices is changeing or some in same stage.
+	 */
+	return find_fsid(disk_super->fsid, NULL);
+}
+
 static int device_list_add(const char *path,
 			   struct btrfs_super_block *disk_super,
 			   u64 devid, struct btrfs_fs_devices **fs_devices_ret)
@@ -338,6 +367,8 @@ static int device_list_add(const char *path,
 			fs_devices = find_fsid_changed(disk_super);
 	} else if (metadata_uuid) {
 		fs_devices = find_fsid_changing_metadata_uuid(disk_super);
+	} else {
+		fs_devices = find_fsid_changing(disk_super);
 	}
 
 	if (metadata_uuid && !fs_devices)
