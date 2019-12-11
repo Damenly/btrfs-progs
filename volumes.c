@@ -214,7 +214,8 @@ static int device_list_add(const char *path,
 	u64 found_transid = btrfs_super_generation(disk_super);
 	bool metadata_uuid = (btrfs_super_incompat_flags(disk_super) &
 		BTRFS_FEATURE_INCOMPAT_METADATA_UUID);
-
+	bool fsid_change_in_progress = (btrfs_super_flags(disk_super) &
+					BTRFS_SUPER_FLAG_CHANGING_FSID_V2);
 	if (metadata_uuid)
 		fs_devices = find_fsid(disk_super->fsid,
 				       disk_super->metadata_uuid);
@@ -238,6 +239,7 @@ static int device_list_add(const char *path,
 		fs_devices->latest_devid = devid;
 		fs_devices->latest_trans = found_transid;
 		fs_devices->lowest_devid = (u64)-1;
+		fs_devices->fsid_change = fsid_change_in_progress;
 		device = NULL;
 	} else {
 		device = find_device(fs_devices, devid,
