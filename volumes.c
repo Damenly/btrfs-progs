@@ -371,12 +371,6 @@ static int device_list_add(const char *path,
 		fs_devices = find_fsid_changing(disk_super);
 	}
 
-	if (metadata_uuid && !fs_devices)
-		fs_devices = find_fsid(disk_super->fsid,
-				       disk_super->metadata_uuid);
-	else
-		fs_devices = find_fsid(disk_super->fsid, NULL);
-
 	if (!fs_devices) {
 		fs_devices = kzalloc(sizeof(*fs_devices), GFP_NOFS);
 		if (!fs_devices)
