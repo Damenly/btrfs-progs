@@ -145,19 +145,34 @@ check_inprogress_flag() {
 }
 
 check_completed() {
+	local metadata_uuid="$3"
+
 	# check that metadata uuid is indeed completed
 	run_check_stdout $SUDO_HELPER "$TOP/btrfs" inspect-internal dump-super \
 		"$1" | grep -q METADATA_UUID
-	[ $? -eq 0 ] || _fail "metadata_uuid not set on $1"
+	if [ $? -ne 0 -a "$metadata_uuid" = 'true' ] ; then
+		_fail "metadata_uuid not set on $1"
+	elif [  $? -eq 0 -a "$metadata_uuid" = 'false' ] ; then
+		_fail "metadata_uuid set on $1"
+	fi
 
 	run_check_stdout $SUDO_HELPER "$TOP/btrfs" inspect-internal dump-super \
-		"$2" | grep -q METADATA_UUID
-	[ $? -eq 0 ] || _fail "metadata_uuid not set on $2"
+		 "$2" | grep -q METADATA_UUID
+	if [ $? -ne 0 -a "$metadata_uuid" = 'true' ] ; then
+		_fail "metadata_uuid not set on $2"
+	elif [  $? -eq 0 -a "$metadata_uuid" = 'false' ] ; then
+		_fail "metadata_uuid set on $2"
+	fi
 }
 
 check_multi_fsid_change() {
 	check_inprogress_flag "$1" "$2"
-	check_completed "$1" "$2"
+	check_completed "$1" "$2" true
+}
+
+check_multi_fsid_change_without_metadata_uuid() {
+	check_inprogress_flag "$1" "$2"
+	check_completed "$1" "$2" false
 }
 
 failure_recovery() {
@@ -217,9 +232,9 @@ failure_recovery "./disk2.raw.xz" "./disk1.raw.xz" check_inprogress_flag
 # of the same filesystem but has both METADATA_UUID incompat and a new
 # metadata uuid set. So disk 3 must always take precedence
 reload_btrfs
-failure_recovery "./disk3.raw.xz" "./disk4.raw.xz" check_completed
+failure_recovery "./disk3.raw.xz" "./disk4.raw.xz" check_completed true
 reload_btrfs
-failure_recovery "./disk4.raw.xz" "./disk3.raw.xz" check_completed
+failure_recovery "./disk4.raw.xz" "./disk3.raw.xz" check_completed true
 
 # disk5 contains an image which has undergone a successful fsid change more
 # than once, disk6 on the other hand is member of the same filesystem but
@@ -229,3 +244,14 @@ reload_btrfs
 failure_recovery "./disk5.raw.xz" "./disk6.raw.xz" check_multi_fsid_change
 reload_btrfs
 failure_recovery "./disk6.raw.xz" "./disk5.raw.xz" check_multi_fsid_change
+
+# disk7 contains an image which has undergone a successful fsid change more
+# than once with FSID_CHANGING flag. disk8 on the other hand is member
+# of the same filesystem but has completed its last change without
+# METADATA_UUID flag set.
+reload_btrfs
+failure_recovery "./disk7.raw.xz" "./disk8.raw.xz" \
+		 check_multi_fsid_change_without_metadata_uuid
+reload_btrfs
+failure_recovery "./disk8.raw.xz" "./disk7.raw.xz" \
+		 check_multi_fsid_change_without_metadata_uuid
