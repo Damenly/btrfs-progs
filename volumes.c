@@ -359,6 +359,8 @@ static int device_list_add(const char *path,
 		BTRFS_FEATURE_INCOMPAT_METADATA_UUID);
 	bool fsid_change_in_progress = (btrfs_super_flags(disk_super) &
 					BTRFS_SUPER_FLAG_CHANGING_FSID_V2);
+	bool new_device_added = false;
+	bool fs_devices_found = false;
 
 	if (fsid_change_in_progress) {
 		if (!metadata_uuid)
@@ -391,9 +393,11 @@ static int device_list_add(const char *path,
 		fs_devices->fsid_change = fsid_change_in_progress;
 		device = NULL;
 	} else {
+		fs_devices_found = true;
 		device = find_device(fs_devices, devid,
 				       disk_super->dev_item.uuid);
 	}
+
 	if (!device) {
 		device = kzalloc(sizeof(*device), GFP_NOFS);
 		if (!device) {
@@ -424,6 +428,7 @@ static int device_list_add(const char *path,
 			btrfs_stack_device_bytes_used(&disk_super->dev_item);
 		list_add(&device->dev_list, &fs_devices->devices);
 		device->fs_devices = fs_devices;
+		new_device_added = true;
 	} else if (!device->name || strcmp(device->name, path)) {
 		char *name;
 
@@ -446,6 +451,23 @@ static int device_list_add(const char *path,
                 device->name = name;
         }
 
+	/*
+	 * If this disk has been pulled into an fs devices created by
+	 * a device which had the CHANGING_FSID_V2 flag then replace the
+	 * metadata_uuid/fsid values of the fs_devices.
+	 */
+	if (new_device_added && fs_devices_found && fs_devices->fsid_change &&
+	    found_transid > fs_devices->latest_trans) {
+		memcpy(fs_devices->fsid, disk_super->fsid,
+		       BTRFS_FSID_SIZE);
+		if (metadata_uuid)
+			memcpy(fs_devices->metadata_uuid,
+			       disk_super->metadata_uuid, BTRFS_FSID_SIZE);
+		else
+			memcpy(fs_devices->metadata_uuid,
+			       disk_super->fsid, BTRFS_FSID_SIZE);
+		fs_devices->fsid_change = false;
+	}
 
 	if (found_transid > fs_devices->latest_trans) {
 		fs_devices->latest_devid = devid;
