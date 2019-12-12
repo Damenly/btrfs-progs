@@ -173,7 +173,9 @@ failure_recovery() {
 	loop2=$(run_check_stdout $SUDO_HELPER losetup --find --show "$image2")
 
 	# Mount and unmount, on trans commit all disks should be consistent
-	run_check $SUDO_HELPER mount "$loop1" "$TEST_MNT"
+	run_mayfail $SUDO_HELPER mount "$loop1" "$TEST_MNT"
+	[ $? -ne 0 ] && run_check $SUDO_HELPER mount "$loop2" "$TEST_MNT"
+
 	run_check $SUDO_HELPER umount "$TEST_MNT"
 
 	# perform any specific check
