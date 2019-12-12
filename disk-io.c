@@ -1177,6 +1177,7 @@ static struct btrfs_fs_info *__open_ctree_fd(int fp, const char *path,
 	int ret;
 	int oflags;
 	unsigned sbflags = SBREAD_DEFAULT;
+	u64 sflags; /* records btrfs_super_flags */
 
 	if (sb_bytenr == 0)
 		sb_bytenr = BTRFS_SUPER_INFO_OFFSET;
@@ -1242,10 +1243,17 @@ static struct btrfs_fs_info *__open_ctree_fd(int fp, const char *path,
 		goto out_devices;
 	}
 
-	if (btrfs_super_flags(disk_super) & BTRFS_SUPER_FLAG_CHANGING_FSID &&
+	sflags = btrfs_super_flags(disk_super);
+	if (sflags & BTRFS_SUPER_FLAG_CHANGING_FSID &&
 	    !fs_info->ignore_fsid_mismatch) {
 		fprintf(stderr, "ERROR: Filesystem UUID change in progress\n");
 		goto out_devices;
+	}
+
+	if (sflags & BTRFS_SUPER_FLAG_CHANGING_FSID_V2) {
+		sflags &= ~BTRFS_SUPER_FLAG_CHANGING_FSID_V2;
+		btrfs_set_super_flags(disk_super, sflags);
+		printf("Found metadata UUID change in progress flag, clearing\n");
 	}
 
 	ASSERT(!memcmp(disk_super->fsid, fs_devices->fsid, BTRFS_FSID_SIZE));
